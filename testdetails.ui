@@ -1,0 +1,912 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TestDetails</class>
+ <widget class="QDialog" name="TestDetails">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>640</width>
+    <height>480</height>
+   </rect>
+  </property>
+  <property name="contextMenuPolicy">
+   <enum>Qt::ContextMenuPolicy::DefaultContextMenu</enum>
+  </property>
+  <property name="acceptDrops">
+   <bool>true</bool>
+  </property>
+  <widget class="QLabel" name="label_OthersObservations">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>440</y>
+     <width>171</width>
+     <height>20</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Remarks / Observations :</string>
+   </property>
+  </widget>
+  <widget class="QPushButton" name="pushButton_Preview">
+   <property name="geometry">
+    <rect>
+     <x>540</x>
+     <y>450</y>
+     <width>93</width>
+     <height>29</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Preview</string>
+   </property>
+  </widget>
+  <widget class="QLineEdit" name="lineEdit_OtherObservation">
+   <property name="geometry">
+    <rect>
+     <x>180</x>
+     <y>435</y>
+     <width>341</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="acceptDrops">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string/>
+   </property>
+  </widget>
+  <widget class="QLabel" name="label_DefectDetails">
+   <property name="geometry">
+    <rect>
+     <x>230</x>
+     <y>20</y>
+     <width>161</width>
+     <height>18</height>
+    </rect>
+   </property>
+   <property name="font">
+    <font>
+     <pointsize>14</pointsize>
+     <bold>true</bold>
+    </font>
+   </property>
+   <property name="text">
+    <string>DEFECT DETAILS</string>
+   </property>
+  </widget>
+  <widget class="QWidget" name="gridLayoutWidget">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>50</y>
+     <width>621</width>
+     <height>52</height>
+    </rect>
+   </property>
+   <layout class="QGridLayout" name="gridLayout">
+    <item row="1" column="1">
+     <widget class="QLineEdit" name="lineEdit_UnitNo">
+      <property name="readOnly">
+       <bool>true</bool>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="0">
+     <widget class="QLabel" name="label_Model">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Model :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="1">
+     <widget class="QLabel" name="label_UnitNO">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Unit No :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="2">
+     <widget class="QLabel" name="label_Date">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Date:</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="0">
+     <widget class="QLineEdit" name="lineEdit_Model">
+      <property name="text">
+       <string>WT-2311D</string>
+      </property>
+      <property name="readOnly">
+       <bool>true</bool>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="2">
+     <widget class="QLineEdit" name="lineEdit_Date">
+      <property name="text">
+       <string/>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="3">
+     <widget class="QLabel" name="label_Time">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Time:</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="3">
+     <widget class="QLineEdit" name="lineEdit_Time">
+      <property name="text">
+       <string/>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="gridLayoutWidget_2">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>110</y>
+     <width>621</width>
+     <height>121</height>
+    </rect>
+   </property>
+   <layout class="QGridLayout" name="gridLayout_2">
+    <item row="2" column="2">
+     <widget class="QLineEdit" name="lineEdit_TP"/>
+    </item>
+    <item row="2" column="0">
+     <widget class="QLineEdit" name="lineEdit_Km">
+      <property name="text">
+       <string/>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="1">
+     <widget class="QLineEdit" name="lineEdit_Mtr"/>
+    </item>
+    <item row="0" column="3">
+     <widget class="QLabel" name="label_WeldType">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Weld Type :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="0">
+     <widget class="QLabel" name="label_KM">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>KM :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="4">
+     <widget class="QLineEdit" name="lineEdit_Stations"/>
+    </item>
+    <item row="0" column="2">
+     <widget class="QLabel" name="label_TP">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>TP :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="1">
+     <widget class="QLabel" name="label_Mtr">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Mtr :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="3">
+     <widget class="QComboBox" name="comboBox_WeldType">
+      <property name="minimumSize">
+       <size>
+        <width>100</width>
+        <height>0</height>
+       </size>
+      </property>
+      <item>
+       <property name="text">
+        <string>AT Weld</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>FB Weld</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>SEJ</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Points</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Rail</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Gas Pressure Weld</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="0" column="4">
+     <widget class="QLabel" name="label_Stations">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Stations :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="0">
+     <widget class="QLabel" name="label_Rail">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Rail :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="0">
+     <widget class="QComboBox" name="comboBox_Rail">
+      <item>
+       <property name="text">
+        <string>LH</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>RH</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="3" column="1">
+     <widget class="QLabel" name="label_Weldno">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Weld  No. :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="1">
+     <widget class="QLineEdit" name="lineEdit_Weldno"/>
+    </item>
+    <item row="3" column="2">
+     <widget class="QLabel" name="label_CH">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>CH. :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="2">
+     <widget class="QLineEdit" name="lineEdit_CH">
+      <property name="readOnly">
+       <bool>true</bool>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="3">
+     <widget class="QLabel" name="label_Calset">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Calset :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="3">
+     <widget class="QLineEdit" name="lineEdit_Calset">
+      <property name="readOnly">
+       <bool>true</bool>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="4">
+     <widget class="QLabel" name="label_Probe">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Probe :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="4">
+     <widget class="QComboBox" name="comboBox_Probe">
+      <item>
+       <property name="text">
+        <string>0°</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>17.5°</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>37°</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>45°</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>70°</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>2x70</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>2x45</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="gridLayoutWidget_3">
+   <property name="geometry">
+    <rect>
+     <x>140</x>
+     <y>230</y>
+     <width>321</width>
+     <height>59</height>
+    </rect>
+   </property>
+   <layout class="QGridLayout" name="gridLayout_3">
+    <item row="1" column="0">
+     <widget class="QComboBox" name="comboBox_Rollmark1">
+      <property name="minimumSize">
+       <size>
+        <width>0</width>
+        <height>25</height>
+       </size>
+      </property>
+      <item>
+       <property name="text">
+        <string>880 O SAIL</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>R260 O SAIL</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>710 O SAIL</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>British Steel</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>MM IRS HSB</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>UIC O SAIL</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="1" column="2">
+     <widget class="QComboBox" name="comboBox_Month">
+      <item>
+       <property name="text">
+        <string>I</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>II</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>III</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>IV</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>V</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>VI</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>VII</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>VIII</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>IX</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>X</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>XI</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>XII</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="0" column="0">
+     <widget class="QLabel" name="label_Rollingmark">
+      <property name="minimumSize">
+       <size>
+        <width>0</width>
+        <height>25</height>
+       </size>
+      </property>
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Rolling Mark :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="1">
+     <widget class="QComboBox" name="comboBox_kg">
+      <item>
+       <property name="text">
+        <string>60</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>52</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>90R</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>36</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="1" column="3">
+     <widget class="QLineEdit" name="lineEdit_Rollmarkyear"/>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QWidget" name="gridLayoutWidget_4">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>290</y>
+     <width>621</width>
+     <height>61</height>
+    </rect>
+   </property>
+   <layout class="QGridLayout" name="gridLayout_4">
+    <item row="0" column="0">
+     <widget class="QLabel" name="label_Mode">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Mode :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="2">
+     <widget class="QComboBox" name="comboBox_Type">
+      <item>
+       <property name="text">
+        <string>HLC</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>VTC</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>VLC</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="1" column="3">
+     <widget class="QComboBox" name="comboBox_Class">
+      <item>
+       <property name="text">
+        <string>DFWO</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>DFWR</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>DFWN</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>GW</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>NR</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>OBS</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>OBSW</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>IMRW</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>No Defect</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="0" column="3">
+     <widget class="QLabel" name="label_Class">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Class :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="2">
+     <widget class="QLabel" name="label_Type">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Type :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="1">
+     <widget class="QLabel" name="label_LocOfDefect">
+      <property name="text">
+       <string>Location of Defect :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="0">
+     <widget class="QComboBox" name="comboBox_Mode">
+      <item>
+       <property name="text">
+        <string>SC</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>DC</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="1" column="1">
+     <widget class="QComboBox" name="comboBox_LocOfDefect">
+      <item>
+       <property name="text">
+        <string>Head</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Web</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Flange</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Foot</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="0" column="4">
+     <widget class="QLabel" name="label_FP">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Jog Plate :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="4">
+     <widget class="QComboBox" name="comboBox_FP">
+      <item>
+       <property name="text">
+        <string>YES</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>NO</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>FP/B</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>FP/C</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>NFP</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QLabel" name="label_Prevdefectdetails">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>360</y>
+     <width>201</width>
+     <height>17</height>
+    </rect>
+   </property>
+   <property name="font">
+    <font>
+     <bold>true</bold>
+    </font>
+   </property>
+   <property name="text">
+    <string>Previous Defect Details :</string>
+   </property>
+  </widget>
+  <widget class="QWidget" name="gridLayoutWidget_5">
+   <property name="geometry">
+    <rect>
+     <x>20</x>
+     <y>380</y>
+     <width>601</width>
+     <height>50</height>
+    </rect>
+   </property>
+   <layout class="QGridLayout" name="gridLayout_5">
+    <item row="0" column="2">
+     <widget class="QLabel" name="label_3">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>Class :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="0">
+     <widget class="QLabel" name="label">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>HM/BP :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="1">
+     <widget class="QLabel" name="label_2">
+      <property name="font">
+       <font>
+        <bold>true</bold>
+       </font>
+      </property>
+      <property name="text">
+       <string>PH :</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="0">
+     <widget class="QLineEdit" name="lineEdit_PrevHM"/>
+    </item>
+    <item row="1" column="1">
+     <widget class="QLineEdit" name="lineEdit_PrevPH"/>
+    </item>
+    <item row="1" column="2">
+     <widget class="QComboBox" name="comboBox">
+      <property name="minimumSize">
+       <size>
+        <width>115</width>
+        <height>0</height>
+       </size>
+      </property>
+      <item>
+       <property name="text">
+        <string>GW</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>DFWN</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>DFWR</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>DFWO</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>DFWNR</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>OBSW</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>IMRW</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

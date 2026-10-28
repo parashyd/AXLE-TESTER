@@ -1,0 +1,1038 @@
+#include "testdetails.h"
+#include "ui_testdetails.h"
+#include <QFile>
+#include <QTextStream>
+#include <QMessageBox>
+#include "matrix_keypad.h"
+#include "testscreen.h"
+#include <QTimer>
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QFile>
+#include "testdetail0.h"
+#include "mainwindow.h"
+#include "settings.h"
+
+ QString Mode;
+ QString TP;
+ QString LocOfDefect ;
+ QString stations;
+ QString rollmark;
+ QString weld;
+ QString Probe;
+ QString classVal;
+ QString FPNFP;
+ QString OthersObservation;
+ QString Time;
+ QString Date;
+ QString PrevHMBP;
+ QString PrevPH;
+ QString PrevClass;
+
+
+enum class InputMode {
+    Numeric,
+    Alphabetic,
+    Alphanumeric,
+    None   // no input allowed
+};
+
+QMap<QLineEdit*, InputMode> inputModes;
+
+QJsonObject obj;
+
+extern QString DC_SC_mode;
+
+
+TestDetails::TestDetails(QWidget *parent)
+    : QDialog(parent)
+    , testdetails(new Ui::TestDetails)
+    , previewscreen(nullptr)
+{
+    this->setWindowFlags(Qt::FramelessWindowHint | Qt::Dialog);
+
+    testdetails->setupUi(this);
+
+    // Apply Light/Dark theme
+    const bool lightTheme =
+        settings::theme().compare("Light", Qt::CaseInsensitive) == 0;
+
+    if (lightTheme)
+    {
+        this->setStyleSheet(R"(
+        QWidget {
+            background-color: #F2F5F8;
+            color: #1B2430;
+            font-family: "Segoe UI";
+            font-size: 11px;
+        }
+
+        QLabel {
+            color: #1B2430;
+            background: transparent;
+        }
+
+        QLineEdit {
+            background-color: #FFFFFF;
+            border: 1px solid #AAB6C3;
+            border-radius: 8px;
+            color: #1B2430;
+            min-height: 28px;
+            padding-left: 8px;
+        }
+
+        QLineEdit:focus {
+            border: 2px solid #3AA0FF;
+            background-color: #F7FBFF;
+        }
+
+        QComboBox {
+            background-color: #FFFFFF;
+            border: 1px solid #AAB6C3;
+            border-radius: 8px;
+            color: #1B2430;
+            min-height: 28px;
+            padding-left: 8px;
+        }
+
+        QComboBox:focus {
+            border: 2px solid #3AA0FF;
+            background-color: #F7FBFF;
+        }
+
+        QComboBox QAbstractItemView {
+            background-color: #FFFFFF;
+            color: #1B2430;
+            selection-background-color: #D7E9FA;
+            selection-color: #1B2430;
+        }
+
+        QPushButton {
+            background-color: #E3EAF1;
+            border: 1px solid #AAB6C3;
+            border-radius: 8px;
+            color: #1B2430;
+            min-height: 20px;
+            padding: 4px 10px;
+        }
+
+        QPushButton:hover {
+            background-color: #D7E9FA;
+            border: 1px solid #3AA0FF;
+        }
+    )");
+    }
+    else
+    {
+        this->setStyleSheet(R"(
+        QWidget {
+            background-color: #2B3138;
+            color: #F2F5F8;
+            font-family: "Segoe UI";
+            font-size: 11px;
+        }
+
+        QLabel {
+            color: #D5DDE5;
+            background: transparent;
+        }
+
+        QLineEdit {
+            background-color: #46515D;
+            border: 1px solid #667381;
+            border-radius: 8px;
+            color: #F2F5F8;
+            min-height: 28px;
+            padding-left: 8px;
+        }
+
+        QLineEdit:focus {
+            border: 2px solid #4DB3FF;
+            background-color: #4E5A67;
+        }
+
+        QComboBox {
+            background-color: #46515D;
+            border: 1px solid #667381;
+            border-radius: 8px;
+            color: #F2F5F8;
+            min-height: 28px;
+            padding-left: 8px;
+        }
+
+        QComboBox:focus {
+            border: 2px solid #4DB3FF;
+            background-color: #4E5A67;
+        }
+
+        QComboBox QAbstractItemView {
+            background-color: #39424C;
+            color: #F2F5F8;
+            selection-background-color: #4E5A67;
+            selection-color: #FFFFFF;
+        }
+
+        QPushButton {
+            background-color: #55606D;
+            border: 1px solid #748191;
+            border-radius: 8px;
+            color: white;
+            min-height: 20px;
+            padding: 4px 10px;
+        }
+
+        QPushButton:hover {
+            background-color: #627081;
+            border: 1px solid #4DB3FF;
+        }
+    )");
+    }
+
+    loadDataFromFile();
+    // QPixmap pixmap = this->grab();
+
+    // // --- Adjust JPG output size ---
+    // QSize jpgTargetSize(640, 480); // You can change this (640x480, 1024x768, etc.)
+    // QPixmap scaledJpg = pixmap.scaled(jpgTargetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    // QString jpgFileName = QString("DefectDetails.jpg");
+    // scaledJpg.save(jpgFileName, "JPG", 100 );
+
+    QTimer::singleShot(0, this, [this]() {
+        testdetails->lineEdit_Km->setFocus();
+        testdetails->lineEdit_Km->setCursorPosition(0);
+        testdetails->lineEdit_Km->selectAll();
+    });
+
+    QTimer *timer = new QTimer(this);
+
+    connect(timer, &QTimer::timeout, this, [=]() {
+        QDateTime now = QDateTime::currentDateTime();
+        testdetails->lineEdit_Date->setText(now.toString("dd-MM-yyyy"));
+        testdetails->lineEdit_Time->setText(now.toString("HH:mm:ss"));
+    });
+
+    timer->start(1000);
+
+    connect(qApp, &QApplication::focusChanged, this, [this](QWidget* old, QWidget* now){
+        if (now) {
+            setLogicalFocus(now);  // auto-highlight current focus
+        }
+    });
+
+
+    testdetails->lineEdit_UnitNo->setText(MachNo);                    //unitno: taken from bin file
+
+    testdetails->lineEdit_CH->setText(QString::number(config.channel));
+    testdetails->lineEdit_Calset->setText(QString::number(config.calset));
+
+    testdetails->comboBox_Probe->setCurrentIndex(config.Angle);                  // Angle (correction)
+    testdetails->comboBox_Mode->setCurrentText(DC_SC_mode);
+    testdetails->lineEdit_Km->setText(km);
+    testdetails->lineEdit_Mtr->setText(M);
+    testdetails->comboBox_Rail->setCurrentText(Rail);
+
+    QString savedPosition = QString::fromLocal8Bit(config.position).trimmed();
+    // Handle a trailing comma if the parser includes it.
+    if (savedPosition.endsWith(','))
+        savedPosition.chop(1);
+
+    const int positionIndex = testdetails->comboBox_LocOfDefect->findText(
+        savedPosition,
+        Qt::MatchFixedString | Qt::MatchCaseSensitive);
+
+    if (positionIndex >= 0)
+        testdetails->comboBox_LocOfDefect->setCurrentIndex(positionIndex);
+    else
+        qWarning() << "Unknown position in Config.txt:" << savedPosition;
+
+    testdetails->comboBox_LocOfDefect->setEditable(false);
+    testdetails->comboBox_Probe->setEditable(false);
+
+    inputModes[testdetails->lineEdit_Stations] = InputMode::Alphabetic;
+    inputModes[testdetails->lineEdit_Km] = InputMode::Alphanumeric;
+    inputModes[testdetails->lineEdit_Mtr] = InputMode::Numeric;
+    inputModes[testdetails->lineEdit_TP] = InputMode::Alphanumeric;
+    inputModes[testdetails->lineEdit_Weldno] = InputMode::Alphanumeric;
+    inputModes[testdetails->lineEdit_Rollmarkyear] = InputMode::Alphanumeric;
+    inputModes[testdetails->lineEdit_Date] = InputMode::Numeric;
+    inputModes[testdetails->lineEdit_Time] = InputMode::Alphanumeric;
+    inputModes[testdetails->lineEdit_OtherObservation] = InputMode::Alphabetic;
+
+}
+
+void TestDetails::setLogicalFocus(QWidget* widget)
+{
+    if (!widget)
+        return;
+
+    const bool lightTheme =
+        settings::theme().compare("Light", Qt::CaseInsensitive) == 0;
+
+    if (m_currentLogicalFocus && m_currentLogicalFocus != widget)
+    {
+        m_currentLogicalFocus->setStyleSheet("");
+    }
+
+    if (lightTheme)
+    {
+        widget->setStyleSheet(
+            "QLineEdit, QTextEdit, QComboBox {"
+            "background-color: #DCEEFF;"
+            "border: 2px solid #3AA0FF;"
+            "color: #1B2430;"
+            "}"
+            );
+    }
+    else
+    {
+        widget->setStyleSheet(
+            "QLineEdit, QTextEdit, QComboBox {"
+            "background-color: #4E5A67;"
+            "border: 2px solid #4DB3FF;"
+            "color: #F2F5F8;"
+            "}"
+            );
+    }
+
+    m_currentLogicalFocus = widget;
+
+    if (widget->isVisible() && widget->isEnabled())
+    {
+        widget->setFocus(Qt::OtherFocusReason);
+
+        if (auto le = qobject_cast<QLineEdit*>(widget))
+            le->setCursorPosition(0);
+    }
+
+    qDebug() << "[LogicalFocus] Widget:" << widget->objectName()
+             << "Visible:" << widget->isVisible()
+             << "Enabled:" << widget->isEnabled()
+             << "hasFocus:" << widget->hasFocus();
+}
+
+TestDetails::~TestDetails()
+{
+    delete testdetails;
+}
+
+void TestDetails::PreviewClick()
+{
+    saveDataToFile();
+    Rail = testdetails->comboBox_Rail->currentText();
+    Mode = testdetails->comboBox_Mode->currentText();
+    km = testdetails->lineEdit_Km->text();
+    M = testdetails->lineEdit_Mtr->text();
+    TP = testdetails->lineEdit_TP->text();
+    LocOfDefect = testdetails->comboBox_LocOfDefect->currentText();
+    stations = testdetails->lineEdit_Stations->text();
+    rollmark = testdetails->comboBox_Rollmark1->currentText() + testdetails->comboBox_kg->currentText() + testdetails->comboBox_Month->currentText() + testdetails->lineEdit_Rollmarkyear->text();
+    weld = testdetails->comboBox_WeldType->currentText() + "-" + testdetails->lineEdit_Weldno->text();
+    Probe = testdetails->comboBox_Probe->currentText();
+    classVal = testdetails->comboBox_Class->currentText();
+    FPNFP = testdetails->comboBox_FP->currentText();
+    OthersObservation = testdetails->lineEdit_OtherObservation->text();   //combo
+    Date = testdetails->lineEdit_Date->text();
+    Time = testdetails->lineEdit_Time->text();
+    PrevHMBP = testdetails->lineEdit_PrevHM->text();
+    PrevPH = testdetails->lineEdit_PrevPH->text();
+    PrevClass=testdetails->comboBox->currentText();
+
+    emit requestPreview();
+}
+
+
+void TestDetails::handleSocketKey(quint8 key)
+{
+    QWidget* current = focusWidget();
+    qDebug() << "Received key of test details(int):" << static_cast<int>(key);
+
+    switch (key)
+    {
+
+    case SAVE:
+        PreviewClick();
+        break;
+
+    case LEFT:   // LEFT
+        qDebug() << "LEFT ARROW" << key;
+        navigateFocus(-1);
+        return;
+
+    case RIGHT:   // RIGHT
+        qDebug() << "RIGHT ARROW" << key;
+        navigateFocus(1);
+        return;
+
+    case BACKSPACE:   // Backspace
+        qDebug() << "Backspace" << key;
+        handleBackspaceInput();
+        return;
+
+    case UP:   // 'UP'
+        qDebug() << "UP arrow" << key;
+        adjustComboBoxIndex(-1);
+        return;
+
+    case DOWN:   // DOWN
+        qDebug() << "DOWN arrow" << key;
+        adjustComboBoxIndex(1);
+        return;
+    }
+
+    // 🔹 Text-capable widget
+    QLineEdit *lineEdit = nullptr;
+    if (QLineEdit *le = qobject_cast<QLineEdit*>(current)) {
+        lineEdit = le;
+    } else if (QComboBox *combo = qobject_cast<QComboBox*>(current)) {
+        if (combo->isEditable()) {
+            lineEdit = combo->lineEdit();
+        } else {
+            qDebug() << "ComboBox not editable — ignoring input.";
+            return;
+        }
+    }
+
+    if (!lineEdit) {
+        qDebug() << "Focused widget does not accept text input";
+        return;
+    }
+
+    // 🔹 Get mode for this field
+    InputMode mode = inputModes.value(lineEdit, InputMode::Alphanumeric);
+
+    switch (mode)
+    {
+    case InputMode::None:
+        qDebug() << "[BLOCKED] Input disabled for:" << lineEdit->objectName();
+        return;
+
+    case InputMode::Numeric:
+        handleMultiPressAlpha(key, lineEdit);   // ✅ let alpha handler manage digits
+        return;
+
+    case InputMode::Alphabetic:
+    case InputMode::Alphanumeric:
+        handleMultiPressAlpha(key, lineEdit);
+        return;
+    }
+}
+
+
+void TestDetails::handleMultiPressAlpha(quint8 key, QLineEdit *lineEdit)
+{
+    if (!lineEdit) return;
+
+    InputMode mode = inputModes.value(lineEdit, InputMode::Alphanumeric);
+    KeyPressState &state = inputStates[lineEdit];
+
+    QChar keyChar(key); // Convert received int to QChar
+
+    if (key == '.' || key == '*')
+    {
+        quint8 groupKey = 200;
+        QString cycle = ".*";
+
+        if (state.lastKey == groupKey &&
+            state.timer.isValid() &&
+            state.timer.elapsed() <= 1000)
+        {
+            // Same special key pressed again:
+            // . <-> *
+            state.pressCount =
+                (state.pressCount + 1) % cycle.length();
+        }
+        else
+        {
+            // Commit previous pending character
+            if (!state.lastChar.isEmpty())
+                state.inputBuffer += state.lastChar;
+
+            state.pressCount = 0;
+        }
+
+        state.lastKey = groupKey;
+        state.lastChar =
+            QString(cycle.at(state.pressCount));
+
+        state.timer.restart();
+
+        QString display =
+            state.inputBuffer +
+            state.lastChar;
+
+        lineEdit->setText(display);
+        lineEdit->setCursorPosition(display.length());
+
+        return;
+    }
+    // ---------- '-' <-> '_' ----------
+    if (key == '-' || key == '_')
+    {
+        quint8 groupKey = 201;
+        QString cycle = "-_";
+
+        if (state.lastKey == groupKey &&
+            state.timer.isValid() &&
+            state.timer.elapsed() <= 1000)
+        {
+            state.pressCount =
+                (state.pressCount + 1) % cycle.length();
+        }
+        else
+        {
+            if (!state.lastChar.isEmpty())
+                state.inputBuffer += state.lastChar;
+
+            state.pressCount = 0;
+        }
+
+        state.lastKey = groupKey;
+        state.lastChar = QString(cycle.at(state.pressCount));
+        state.timer.restart();
+
+        QString display = state.inputBuffer + state.lastChar;
+
+        lineEdit->setText(display);
+        lineEdit->setCursorPosition(display.length());
+
+        return;
+    }
+    // ---------- SPACE ----------
+    if (key == ' ')
+    {
+        // Commit previous pending character
+        if (!state.lastChar.isEmpty())
+        {
+            state.inputBuffer += state.lastChar;
+            state.lastChar.clear();
+        }
+
+        // Insert one space
+        state.inputBuffer += ' ';
+
+        // Reset multitap state
+        state.lastKey = 0;
+        state.pressCount = 0;
+        state.timer.invalidate();
+
+        lineEdit->setText(state.inputBuffer);
+        lineEdit->setCursorPosition(state.inputBuffer.length());
+
+        qDebug() << "Special: SPACE Buffer:" << state.inputBuffer;
+        return;
+    }
+    /* ---------------- Numeric Mode ---------------- */
+    /* ---------------- Numeric Mode ---------------- */
+    if (mode == InputMode::Numeric)
+    {
+        QString digit;
+
+        if (key >= '0' && key <= '9') {
+            digit = QChar(key);
+        }
+        else if (key >= 'A' && key <= 'Z') {
+
+            static QMap<QChar, QChar> letterToDigit = {
+                {'A','1'},{'B','1'},{'C','1'},
+                {'D','2'},{'E','2'},{'F','2'},
+                {'G','3'},{'H','3'},{'I','3'},
+                {'J','4'},{'K','4'},{'L','4'},
+                {'M','5'},{'N','5'},{'O','5'},
+                {'P','6'},{'Q','6'},{'R','6'},{'S','6'},
+                {'T','7'},{'U','7'},{'V','7'},
+                {'W','8'},{'X','8'},{'Y','8'},{'Z','8'}
+            };
+
+            digit = letterToDigit.value(QChar(key), QChar());
+        }
+
+        // Do NOT handle '.', '-', '*' here.
+        // They are already handled above as special characters.
+
+        if (digit.isEmpty()) {
+            qDebug() << "[BLOCKED] Invalid numeric key:" << key;
+            return;
+        }
+
+        /*
+     * IMPORTANT:
+     * If a special character such as '.' is currently
+     * displayed as state.lastChar, commit it before
+     * adding the numeric digit.
+     *
+     * Example:
+     *     press '.'  -> lastChar = "."
+     *     press '2'  -> inputBuffer becomes "."
+     *                   then append "2"
+     *                   result = ".2"
+     */
+        if (!state.lastChar.isEmpty())
+        {
+            qDebug() << "[Numeric] Committing pending character:"
+                     << state.lastChar;
+
+            state.inputBuffer += state.lastChar;
+            state.lastChar.clear();
+        }
+
+        // Numeric digit is immediately committed
+        state.inputBuffer += digit;
+
+        // Reset multi-tap state
+        state.lastKey = 0;
+        state.pressCount = 0;
+        state.timer.invalidate();
+
+        lineEdit->setText(state.inputBuffer);
+        lineEdit->setCursorPosition(state.inputBuffer.length());
+
+        qDebug() << "[UI] Numeric updated:"
+                 << lineEdit->objectName()
+                 << "→"
+                 << state.inputBuffer;
+
+        return;
+    }
+
+
+    /* ---------------- Alphabetic Mode ---------------- */
+    if (mode == InputMode::Alphabetic)
+    {
+
+        static QMap<quint8, QString> multiTapAlphaMap = {
+            { '1', "ABC" }, { '2', "DEF" }, { '3', "GHI" },
+            { '4', "JKL" }, { '5', "MNO" }, { '6', "PQRS" },
+            { '7', "TUV" }, { '8', "WXYZ" }, { '9', " " }, { '0', "0" }
+        };
+
+        static QMap<QChar, QChar> letterToNumericKey = {
+            {'A','1'},{'B','1'},{'C','1'},
+            {'D','2'},{'E','2'},{'F','2'},
+            {'G','3'},{'H','3'},{'I','3'},
+            {'J','4'},{'K','4'},{'L','4'},
+            {'M','5'},{'N','5'},{'O','5'},
+            {'P','6'},{'Q','6'},{'R','6'},{'S','6'},
+            {'T','7'},{'U','7'},{'V','7'},
+            {'W','8'},{'X','8'},{'Y','8'},{'Z','8'}
+        };
+
+        static QMap<quint8, QString> keyMap = {
+            { 'A',"A"},{'B',"B"},{'C',"C"},{'D',"D"},{'E',"E"},{'F',"F"},
+            {'G',"G"},{'H',"H"},{'I',"I"},{'J',"J"},{'K',"K"},{'L',"L"},
+            {'M',"M"},{'N',"N"},{'O',"O"},{'P',"P"},{'Q',"Q"},{'R',"R"},
+            {'S',"S"},{'T',"T"},{'U',"U"},{'V',"V"},{'W',"W"},{'X',"X"},
+            {'Y',"Y"},{'Z',"Z"}
+        };
+
+        // -------- Normalize key for multi-tap --------
+        quint8 multiTapKey = key;
+        if (letterToNumericKey.contains(QChar(key))) {
+            multiTapKey = static_cast<quint8>(letterToNumericKey[QChar(key)].unicode());
+        }
+
+        QString filtered;
+        if (multiTapAlphaMap.contains(multiTapKey)) {
+            filtered = multiTapAlphaMap[multiTapKey]; // numeric key → letters
+        } else if (keyMap.contains(key)) {
+            filtered = keyMap[key]; // single letters
+        } else {
+            return; // unknown key
+        }
+
+        // -------- Multi-tap logic --------
+        if (state.lastKey == multiTapKey && state.timer.isValid() && state.timer.elapsed() <= 1000) {
+            state.pressCount = (state.pressCount + 1) % filtered.length();
+        } else {
+            if (!state.lastChar.isEmpty()) {
+                state.inputBuffer += state.lastChar; // commit previous char
+            }
+            state.pressCount = 0;
+        }
+
+        state.lastChar = filtered[state.pressCount];
+        state.lastKey = multiTapKey;
+        state.timer.restart();
+
+        QString combined = state.inputBuffer + state.lastChar;
+        lineEdit->setText(combined);
+        lineEdit->setCursorPosition(combined.length());
+
+        qDebug() << "[UI] Key:" << char(key)
+                 << "PressCount:" << state.pressCount
+                 << "Output:" << combined;
+        return;
+    }
+
+
+    /* ---------------- Alphanumeric Mode ---------------- */
+    // Map letters to numeric groups
+    static QMap<QChar, QChar> alphaToNum = {
+        {'A','1'},{'B','1'},{'C','1'},
+        {'D','2'},{'E','2'},{'F','2'},
+        {'G','3'},{'H','3'},{'I','3'},
+        {'J','4'},{'K','4'},{'L','4'},
+        {'M','5'},{'N','5'},{'O','5'},
+        {'P','6'},{'Q','6'},{'R','6'},{'S','6'},
+        {'T','7'},{'U','7'},{'V','7'},
+        {'W','8'},{'X','8'},{'Y','8'},{'Z','8'}
+    };
+
+    quint8 normalizedKey = key;
+    if (key >= 'A' && key <= 'Z') {
+        normalizedKey = static_cast<quint8>(alphaToNum.value(QChar(key), QChar(0)).unicode());
+        if (normalizedKey == 0) {
+            qDebug() << "[BLOCKED] Unknown alpha key:" << char(key);
+            return;
+        }
+    }
+
+    // Alphanumeric multi-tap cycle
+    static QMap<quint8, QString> cycleMap = {
+        { '1',"1ABC" }, { '2',"2DEF" }, { '3',"3GHI" },
+        { '4',"4JKL" }, { '5',"5MNO" }, { '6',"6PQRS" },
+        { '7',"7TUV" }, { '8',"8WXYZ" }, { '9',"9" },
+        { '0',"0" }, { '-'," -" }
+    };
+
+    if (!cycleMap.contains(normalizedKey)) {
+        qDebug() << "[BLOCKED] Unsupported key:" << char(key);
+        return;
+    }
+
+    const QString &cycle = cycleMap[normalizedKey];
+
+    if (state.lastKey == normalizedKey &&
+        state.timer.isValid() &&
+        state.timer.elapsed() <= 1000)
+    {
+        // Same numeric key within timeout:
+        // continue multi-tap cycle
+        state.pressCount =
+            (state.pressCount + 1) % cycle.length();
+    }
+    else
+    {
+        // A different key was pressed.
+        // Commit the previous pending character,
+        // including '.' or '*'.
+        if (!state.lastChar.isEmpty())
+        {
+            state.inputBuffer += state.lastChar;
+            state.lastChar.clear();
+        }
+
+        state.pressCount = 0;
+    }
+
+    state.lastKey  = normalizedKey;
+    state.lastChar = QString(cycle.at(state.pressCount));
+    state.timer.restart();
+
+    QString display = state.inputBuffer + state.lastChar;
+    lineEdit->setText(display);
+    lineEdit->setCursorPosition(display.length());
+
+    qDebug() << "[UI] Key:" << char(key)
+             << "Normalized:" << char(normalizedKey)
+             << "Cycle:" << cycle
+             << "Index:" << state.pressCount
+             << "Text:" << display;
+}
+
+
+void TestDetails::navigateFocus(int direction)
+{
+    QList<QWidget*> navWidgets = {
+        testdetails->lineEdit_Date,
+        testdetails->lineEdit_Time,
+        testdetails->lineEdit_Km,
+        testdetails->lineEdit_Mtr,
+        testdetails->lineEdit_TP,
+        testdetails->comboBox_WeldType,
+        testdetails->lineEdit_Stations,
+        testdetails->comboBox_Rail,
+        testdetails->lineEdit_Weldno,
+        testdetails->comboBox_Probe,
+        testdetails->comboBox_Rollmark1,
+        testdetails->comboBox_kg,
+        testdetails->comboBox_Month,
+        testdetails->lineEdit_Rollmarkyear,
+        testdetails->comboBox_Mode,
+        testdetails->comboBox_LocOfDefect,
+        testdetails->comboBox_Type,
+        testdetails->comboBox_Class,
+        testdetails->comboBox_FP,
+        testdetails->lineEdit_PrevHM,
+        testdetails->lineEdit_PrevPH,
+        testdetails->comboBox,
+        testdetails->lineEdit_OtherObservation,
+    };
+
+    QWidget *current = focusWidget();
+    int index = navWidgets.indexOf(current);
+    if (index == -1) index = 0;
+
+    // Wrap-around navigation
+    int newIndex = (index + direction + navWidgets.size()) % navWidgets.size();
+    QWidget *nextWidget = navWidgets[newIndex];
+
+    // 🔹 Reset previous widget (restore white background)
+    const bool lightTheme =
+        settings::theme().compare("Light", Qt::CaseInsensitive) == 0;
+
+    // Reset previous widget
+    if (index >= 0 && index < navWidgets.size())
+    {
+        QWidget *prev = navWidgets[index];
+
+        prev->setStyleSheet("");
+        prev->clearFocus();
+
+        if (QLineEdit *lineEdit = qobject_cast<QLineEdit*>(prev))
+        {
+            lineEdit->setSelection(0, 0);
+        }
+    }
+
+    // Prepare next widget
+    nextWidget->setAttribute(Qt::WA_StyledBackground, true);
+    nextWidget->setFocus(Qt::TabFocusReason);
+
+    // Apply theme-aware focus highlight
+    if (lightTheme)
+    {
+        nextWidget->setStyleSheet(
+            "QLineEdit, QTextEdit, QComboBox {"
+            "background-color: #DCEEFF;"
+            "border: 2px solid #3AA0FF;"
+            "color: #1B2430;"
+            "outline: none;"
+            "}"
+            "QLineEdit:focus, QTextEdit:focus, QComboBox:focus {"
+            "background-color: #DCEEFF;"
+            "border: 2px solid #3AA0FF;"
+            "color: #1B2430;"
+            "}"
+            );
+    }
+    else
+    {
+        nextWidget->setStyleSheet(
+            "QLineEdit, QTextEdit, QComboBox {"
+            "background-color: #4E5A67;"
+            "border: 2px solid #4DB3FF;"
+            "color: #F2F5F8;"
+            "outline: none;"
+            "}"
+            "QLineEdit:focus, QTextEdit:focus, QComboBox:focus {"
+            "background-color: #4E5A67;"
+            "border: 2px solid #4DB3FF;"
+            "color: #F2F5F8;"
+            "}"
+            );
+    }
+
+    if (QLineEdit *lineEdit = qobject_cast<QLineEdit*>(nextWidget))
+    {
+        lineEdit->setCursorPosition(0);
+        lineEdit->selectAll();
+    }
+    else if (QTextEdit *textEdit = qobject_cast<QTextEdit*>(nextWidget))
+    {
+        textEdit->moveCursor(QTextCursor::Start);
+        textEdit->selectAll();
+    }
+
+    qDebug() << "Moved focus from"
+             << (index >= 0 ? navWidgets[index]->objectName() : "None")
+             << "to"
+             << nextWidget->objectName();
+}
+
+
+void TestDetails::handleBackspaceInput()
+{
+    QWidget* focusedWidget = this->focusWidget();
+
+    if (QLineEdit* lineEdit = qobject_cast<QLineEdit*>(focusedWidget)) {
+        KeyPressState &state = inputStates[lineEdit];
+
+        if (!state.lastChar.isEmpty()) {
+            // 🔹 Remove only current multi-tap character
+            state.lastChar.clear();
+        }
+        else if (!state.inputBuffer.isEmpty()) {
+            // 🔹 Remove last committed character
+            state.inputBuffer.chop(1);
+        }
+
+        //reset multi-tap state
+        state.lastKey = 0;
+        state.pressCount = 0;
+        state.timer.invalidate();
+
+        QString updated = state.inputBuffer + state.lastChar;
+        lineEdit->setText(updated);
+        lineEdit->setCursorPosition(updated.length());
+
+        qDebug() << "[UI] Backspace fixed, buffer:" << updated;
+        return;
+    }
+
+    // QTextEdit case
+    if (QTextEdit* textEdit = qobject_cast<QTextEdit*>(focusedWidget)) {
+        QString text = textEdit->toPlainText();
+        if (!text.isEmpty()) {
+            text.chop(1);
+            textEdit->setPlainText(text);
+            QTextCursor cursor = textEdit->textCursor();
+            cursor.movePosition(QTextCursor::End);
+            textEdit->setTextCursor(cursor);
+        }
+    }
+}
+
+
+
+void TestDetails::adjustComboBoxIndex(int delta)
+{
+
+    QWidget* focused = this->focusWidget();
+    if (!focused) {
+        qDebug() << "No focused widget.";
+        return;
+    }
+
+    qDebug() << "Focused widget:" << focused->objectName()
+             << "Type:" << focused->metaObject()->className();
+
+    QComboBox* combo = qobject_cast<QComboBox*>(focused);
+    if (!combo) {
+        qDebug() << "Focused widget is not a QComboBox.";
+        return;
+    }
+
+    int currentIndex = combo->currentIndex();
+    int count = combo->count();
+
+    if (count == 0) {
+        qDebug() << "ComboBox is empty.";
+        return;
+    }
+
+    int newIndex = qBound(0, currentIndex + delta, count - 1);
+    combo->setCurrentIndex(newIndex);
+
+    qDebug() << "ComboBox" << combo->objectName()
+             << "changed to index" << newIndex
+             << "value:" << combo->currentText();
+}
+
+
+bool TestDetails::isPreviewOpen() const
+{
+    return previewDialog != nullptr;
+}
+
+
+void TestDetails::closePreview()
+{
+    if (previewDialog)
+    {
+        previewDialog->close();
+        delete previewDialog;
+        previewDialog = nullptr;
+        previewScreenIsOpen = false;
+    }
+}
+
+
+void TestDetails::saveDataToFile()
+{
+    QFile file("testdetails.json");
+
+    QJsonObject obj;
+    if(file.open(QIODevice::ReadOnly))
+    {
+        QByteArray data = file.readAll();
+        file.close();
+
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+
+        if(doc.isObject())
+            obj = doc.object();
+    }
+    obj["Stations"] = testdetails->lineEdit_Stations->text();
+    obj["Km"]=testdetails->lineEdit_Km->text();
+    obj["Mtr"]=testdetails->lineEdit_Mtr->text();
+    obj["TP"]=testdetails->lineEdit_TP->text();
+    obj["WeldType"] = testdetails->comboBox_WeldType->currentText();
+    obj["Rail"] = testdetails->comboBox_Rail->currentText();
+    obj["WeldNo"] = testdetails->lineEdit_Weldno->text();
+    obj["RollMark"] = testdetails->comboBox_Rollmark1->currentText();
+    obj["kg"] = testdetails->comboBox_kg->currentText();
+    obj["Month"] = testdetails->comboBox_Month->currentText();
+    obj["RollMarkYear"]=testdetails->lineEdit_Rollmarkyear->text();
+    obj["Probe"] = testdetails->comboBox_Probe->currentText();
+    obj["Mode"] = testdetails->comboBox_Mode->currentText();
+    obj["LocOfDefect"] = testdetails->comboBox_LocOfDefect->currentText();
+    obj["Type"] = testdetails->comboBox_Type->currentText();
+    obj["Class"] = testdetails->comboBox_Class->currentText();
+    obj["FP"] = testdetails->comboBox_FP->currentText();
+    obj["OthersObservation"] = testdetails->lineEdit_OtherObservation->text();
+    obj["Date"] = testdetails->lineEdit_Date->text();
+    obj["Time"] = testdetails->lineEdit_Time->text();
+
+    if (file.open(QIODevice::WriteOnly)) {
+        file.write(QJsonDocument(obj).toJson());
+        file.close();
+        qDebug() << "[INFO] TestDetails saved to file.";
+    }
+}
+
+
+void TestDetails::loadDataFromFile()
+{
+    QFile file("testdetails.json");
+    if (!file.exists()) {
+        return;
+    }
+
+    if (file.open(QIODevice::ReadOnly)) {
+        QByteArray data = file.readAll();
+        file.close();
+
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        QJsonObject obj = doc.object();
+
+
+        // Restore other fields from last session
+        testdetails->lineEdit_Stations->setText(obj["Stations"].toString());
+        testdetails->lineEdit_Km->setText(obj["Km"].toString());
+        testdetails->lineEdit_Mtr->setText(obj["Mtr"].toString());
+        testdetails->lineEdit_TP->setText(obj["TP"].toString());
+        testdetails->comboBox_WeldType->setCurrentText(obj["WeldType"].toString());
+        testdetails->comboBox_Rail->setCurrentText(obj["Rail"].toString());
+        testdetails->lineEdit_Weldno->setText(obj["WeldNo"].toString());
+        testdetails->comboBox_Rollmark1->setCurrentText(obj["RollMark"].toString());
+        testdetails->comboBox_kg->setCurrentText(obj["kg"].toString());
+        testdetails->comboBox_Month->setCurrentText(obj["Month"].toString());
+        testdetails->lineEdit_Rollmarkyear->setText(obj["RollMarkYear"].toString());
+        testdetails->comboBox_Probe->setCurrentText(obj["Probe"].toString());
+        testdetails->comboBox_Mode->setCurrentText(obj["Mode"].toString());
+        testdetails->comboBox_LocOfDefect->setCurrentText(obj["LocOfDefect"].toString());
+        testdetails->comboBox_Type->setCurrentText(obj["Type"].toString());
+        testdetails->comboBox_Class->setCurrentText(obj["Class"].toString());
+        testdetails->comboBox_FP->setCurrentText(obj["FP"].toString());
+        testdetails->lineEdit_OtherObservation->setText(obj["OthersObservation"].toString());
+
+
+
+        testdetails->lineEdit_Date->setText(obj["Date"].toString());
+        testdetails->lineEdit_Time->setText(obj["Time"].toString());
+
+
+    }
+}
+

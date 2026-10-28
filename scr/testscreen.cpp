@@ -1,0 +1,4178 @@
+#include "testscreen.h"
+#include "ui_testscreen.h"
+#include "DataFile.h"
+#include <QMessageBox>
+#include <QThread>
+#include <QDebug>
+#include <QRegularExpression>
+#include <QMap>
+#include <cmath>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <pthread.h>
+#include <sched.h>
+#include <QTimer>
+#include <QtGlobal>
+#include "mainwindow.h"
+#include "matrix_keypad.h"
+#include "Battery.h"
+#include <QSvgRenderer>
+#include <QPainter>
+#include "Audio.h"
+#include "openlog.h"
+#include "previewscreen.h"
+#include "testdetail0.h"
+#include "wt_logger.h"
+#include <QElapsedTimer>
+#include "settings.h"
+extern "C" {
+#include "gps.h"
+}
+#define MAX_LINE 200
+#define LINE_LENGTH 70
+
+extern pthread_t Dpram,Keypad;
+extern SharedData* shared;
+ConfigEntry config;
+PostSave Postlog;
+extern ConfigEntry temp;
+
+
+enum InputMode
+{
+    InputMode_None,
+    InputMode_Calset,
+    InputMode_TestDetails
+};
+
+InputMode currentInputMode = InputMode_None;
+QString DC_SC_mode,calsetStr;
+
+
+double ph1Value = 0, ph2Value = 0,phValue = 0,xPeakIndex1=-1,maxX, maxY;
+float RANGE_FACTOR, DELAY_FACTOR = 3.378, m_audioPercent = 0;
+//float RANGE_FACTOR_LT30 = 3.4;
+float RANGE_FACTOR_LT30 = 3.378;
+float RANGE_FACTOR_GT30 = 6.212;
+int peakIndex =-1,peakIndex1 = -1, peakIndex2 = -1,UserVelocity,userGainVal,SEC,CP=1;
+static int ModeCnt = 0,AudioLevel = 0,DACCnt = 0,CalGateCnt = 0,channelCnt=0;
+
+bool freeze;
+bool zoom = false;
+bool gate1_focus=false;
+bool gate2_focus=false;
+
+QString receivedChannel,receivedCalset;
+QMap<int, KeyPressState> keyStates;
+
+KeyPressState calsetState;
+QVector<double> xDataFreeze , yDataFreeze,DACx, DACy;
+QVector<double> xData, yData,xNorm;
+
+QByteArray yDataa;
+
+//QFile logfile;
+WtLogger logfile;
+
+QVector<float> gain_offsetArr;
+QVector<int> range_offsetArr,delay_offsetArr,reject_offsetArr;
+
+
+int gain_Offset_i,range_Offset_i,delay_Offset_i,reject_Offset_i;
+//Openlog *openlogScreen = nullptr;
+
+
+TestScreen::TestScreen(QWidget *parent)
+    : QMainWindow(parent)
+    , ui(new Ui::TestScreen)
+{
+    this->setWindowFlags(Qt::FramelessWindowHint | Qt::Window);         // to disable the menu bar
+    applyTestScreenTheme();
+    ui->setupUi(this);
+    // QPixmap pixmap = this->grab();
+
+    // // --- Adjust JPG output size ---
+    // QSize jpgTargetSize(640, 480); // You can change this (640x480, 1024x768, etc.)
+    // QPixmap scaledJpg = pixmap.scaled(jpgTargetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    // QString jpgFileName = QString("TestScreen.jpg");
+    // scaledJpg.save(jpgFileName, "JPG", 100 );
+
+    display_mc_no();
+    gain_offsetArr={0.5,1,2,3,6,10};
+    range_offsetArr={1,2,5,10,50,100};
+    delay_offsetArr={1,2,5,10,50,100};
+    reject_offsetArr={1,2,5,10,20,30};
+
+    gain_Offset_i=0;
+    range_Offset_i=0;
+    delay_Offset_i=0;
+    reject_Offset_i=0;
+
+
+    DACx.resize(10);
+    DACy.resize(10);
+
+
+    // --------------------------------------------------
+    // Load Audio Level from Settings
+    // Settings stores audio level as 0-100%
+    // --------------------------------------------------
+    AudioLevel = settings::audioLevel();
+
+    if (AudioLevel < 0)
+        AudioLevel = 0;
+
+    if (AudioLevel > 100)
+        AudioLevel = 100;
+
+    const int duty = AudioLevel * 10000;
+
+    Buzzerinit();
+    BuzzerDuty(duty);
+
+    m_audioPercent = static_cast<float>(AudioLevel);
+
+    ui->label_audioIndicator->update();
+    ui->label_audioIndicator->installEventFilter(this);
+
+    BatteryIndication();
+
+    plotUpdateTimer = new QTimer(this);
+    BatteryUpdateTimer = new QTimer(this);
+    gpsUpdateTimer= new QTimer(this);
+
+    ui->Plot->setOpenGl(true);
+
+    setupPlotAppearance();
+
+    // Create graphs ONCE (no indexing mistakes later)
+    g1border = ui->Plot->addGraph();
+    g2border = ui->Plot->addGraph();
+    g1Line      = ui->Plot->addGraph();
+    g2Line      = ui->Plot->addGraph();
+    waveformGraph = ui->Plot->addGraph();
+    DACline = ui->Plot->addGraph();
+
+
+    ui->label_latitude->setStyleSheet(
+        "background-color: transparent;"
+        // "color: rgba(255, 255, 255, 100);"
+        //"color: white;"
+        );
+    ui->label_logitude->setStyleSheet(
+        "background-color: transparent;"
+        // "color: rgba(255, 255, 255, 100);"
+        //"color: white;"
+        );
+
+    ui->label_latitude->setText("Waiting...");
+    ui->label_logitude->setText("Waiting...");
+    connect(gpsUpdateTimer, &QTimer::timeout, this,     [this]() {
+       ui->label_latitude->setText(GPS_GetLatitude());
+       ui->label_logitude->setText(GPS_GetLongitude());
+    });
+    // gpsUpdateTimer->start(10000); //10 sec
+    gpsUpdateTimer->start(100); //1 sec
+
+    configStatusTimer = new QTimer(this);
+    configStatusTimer->setSingleShot(true);
+    connect(configStatusTimer,
+            &QTimer::timeout,
+            this,
+            [this]()
+            {
+                ui->label_configStatus->clear();
+            });
+
+    calibWarningTimer= new QTimer(this);
+    calibWarningTimer->setSingleShot(true);
+    connect(calibWarningTimer,
+            &QTimer::timeout,
+            this,
+            [this]()
+            {
+                ui->label_calibWarning->setVisible(false);
+            });
+
+    // Appearance
+    g1Line->setPen(QPen(QColor("#219601"), 2));  // Green
+    g2Line->setPen(QPen(QColor("#0818ff"), 2));  // Blue
+    //waveformGraph->setPen(QPen(Qt::yellow, 2));
+    g1border->setPen(QPen(Qt::white, 6));
+    g2border->setPen(QPen(Qt::white, 6));
+    g1border->setVisible(false);
+    g2border->setVisible(false);
+
+    loadSavedConfig();
+    UserVelocity = Postlog.velocity;
+
+    ui->lineEdit_Mode->setText("SC");
+    ui->label_DAC->setVisible(false);
+    ui->lineEdit_CP->setVisible(false);
+    ui->label_offset->setVisible(false);
+    ui->label_calibWarning->setVisible(false);
+
+    ui->label_record->setFixedSize(30, 30);
+
+    autoRunConfig();
+    onApplyGainClicked();
+
+    //connect(plotUpdateTimer, &QTimer::timeout, this, &TestScreen::updateGraphWithData);
+    connect(plotUpdateTimer, &QTimer::timeout, this,     [this]() {
+        static bool lastFreezeState = false;
+        freeze = ui->label_freeze->isVisible();
+        if (freeze && !lastFreezeState) {
+            xDataFreeze.clear();
+            yDataFreeze.clear();
+        }
+        lastFreezeState = freeze;
+
+        if (ui->label_freeze->isVisible()) {
+            waveformGraph->setLineStyle(QCPGraph::lsImpulse);
+            handleFreezeLogic();
+        }else{
+             waveformGraph->setLineStyle(QCPGraph::lsLine);
+            updateGraphWithData();
+        }
+    });
+    // plotUpdateTimer->start(100);
+    plotUpdateTimer->start(20);      //100msec, 10msec
+    qDebug()<<"plottimerstarted";
+
+    connect(qApp, &QApplication::focusChanged, this, [this](QWidget* old, QWidget* now){
+        if (now) {
+            setLogicalFocus(now);  // auto-highlight current focus
+        }
+    });
+
+
+
+    connect(BatteryUpdateTimer, &QTimer::timeout, this,&TestScreen::BatteryIndication);
+    BatteryUpdateTimer->start(3000);          // 3sec
+
+    // In constructor or initialization
+    // connect(ui->lineEdit_G1ST, &QLineEdit::textChanged, this, [this](const QString &){
+    // g1_start = ui->lineEdit_G1ST->text().toDouble();        // update value
+    //     updateGraphWithData();                              // redraw graph
+    // });
+
+    // connect(ui->lineEdit_G1ED, &QLineEdit::textChanged, this, [this](const QString &){
+    //     g1_end = ui->lineEdit_G1ED->text().toDouble();
+    //     updateGraphWithData();
+    // });
+
+    // connect(ui->lineEdit_TH1, &QLineEdit::textChanged, this, [this](const QString &){
+    //     th1 = ui->lineEdit_TH1->text().toDouble();
+    //     updateGraphWithData();
+    // });
+
+    // connect(ui->lineEdit_G2ST, &QLineEdit::textChanged, this, [this](const QString &){
+    //     g2_start = ui->lineEdit_G2ST->text().toDouble();
+    //     updateGraphWithData();                              // redraw graph
+    // });
+
+    // connect(ui->lineEdit_G2ED, &QLineEdit::textChanged, this, [this](const QString &){
+    //     g2_end = ui->lineEdit_G2ED->text().toDouble();
+    //     updateGraphWithData();
+    // });
+
+    // connect(ui->lineEdit_TH2, &QLineEdit::textChanged, this, [this](const QString &){
+    //     th2 = ui->lineEdit_TH2->text().toDouble();
+    //     updateGraphWithData();
+    // });
+
+    //Added to hard code the velocity based on angle
+
+
+    ui->label_freeze->setVisible(false);//Make Freeze disable initially
+    ui->label_pause->setVisible(false);//Make pause disable initially
+    ui->label_record->setVisible(false);//Make label_record disable initially
+
+    ui->label_G1ST->setStyleSheet("QLabel { color : #219601; }");
+    ui->label_G1ED->setStyleSheet("QLabel { color : #219601; }");
+    ui->label_TH1->setStyleSheet("QLabel { color : #219601; }");
+
+    ui->label_G2ST->setStyleSheet("QLabel { color : #0818ff; }");
+    ui->label_G2ED->setStyleSheet("QLabel { color : #0818ff; }");
+    ui->label_TH2->setStyleSheet("QLabel { color : #0818ff; }");
+
+    inputStates[ui->lineEdit_calset] = KeyPressState();
+    inputStates[ui->lineEdit_Gain]   = KeyPressState();
+    inputStates[ui->lineEdit_Range]  = KeyPressState();
+    inputStates[ui->lineEdit_Delay]  = KeyPressState();
+    inputStates[ui->lineEdit_Reject] = KeyPressState();
+    inputStates[ui->lineEdit_Angle]  = KeyPressState();
+    inputStates[ui->lineEdit_G1ST]   = KeyPressState();
+    inputStates[ui->lineEdit_G1ED]   = KeyPressState();
+    inputStates[ui->lineEdit_TH1]    = KeyPressState();
+    inputStates[ui->lineEdit_G2ST]   = KeyPressState();
+    inputStates[ui->lineEdit_G2ED]   = KeyPressState();
+    inputStates[ui->lineEdit_TH2]    = KeyPressState();
+}
+
+// In TestScreen.cpp
+void TestScreen::setLogicalFocus(QWidget* widget)
+{
+    if (!widget) return;
+
+    // 1️ Remove previous highlight
+    if (m_currentLogicalFocus && m_currentLogicalFocus != widget) {
+        // Reset style to default
+        m_currentLogicalFocus->setStyleSheet("");
+    }
+
+    // 2️⃣ Apply highlight to the new widget\
+    // "background-color: rgb(255,255,150);"
+    widget->setStyleSheet(
+        "background-color: rgb(120,180,255);"
+        "border: 2px solid black;"
+        );
+
+
+    m_currentLogicalFocus = widget;
+
+    // 3️⃣ Optional: attempt to give real Qt focus
+    if (widget->isVisible() && widget->isEnabled()) {
+        // For Wayland, this may not guarantee OS focus, but it's harmless
+        widget->setFocus(Qt::OtherFocusReason);
+
+        // If it's a QLineEdit, put cursor at start
+        if (auto le = qobject_cast<QLineEdit*>(widget)) {
+            le->setCursorPosition(0);
+        }
+    }
+
+    // 4️⃣ Debug output
+    qDebug() << "[LogicalFocus] Widget:" << widget->objectName()
+             << "Visible:" << widget->isVisible()
+             << "Enabled:" << widget->isEnabled()
+             << "hasFocus:" << widget->hasFocus();
+}
+
+
+
+
+void TestScreen::setupPlotAppearance()
+{
+    ui->Plot->setFixedSize(485, 335);
+
+    const bool light =
+        settings::theme().compare("Light", Qt::CaseInsensitive) == 0;
+
+    QColor plotBackground;
+    QColor axisColor;
+    QColor gridColor;
+    QColor subGridColor;
+
+    if (light)
+    {
+        // LIGHT THEME
+        plotBackground = QColor("#FFFFFF");
+        axisColor      = QColor("#202020");
+        gridColor      = QColor("#B8C0C8");
+        subGridColor   = QColor("#E0E5EA");
+    }
+    else
+    {
+        // DARK THEME
+        plotBackground = QColor("#000000");
+        axisColor      = QColor("#FFFFFF");
+        gridColor      = QColor("#666666");
+        subGridColor   = QColor("#303030");
+    }
+
+    ui->Plot->setBackground(plotBackground);
+
+    // ---------------- X AXIS ----------------
+
+    QSharedPointer<QCPAxisTickerFixed> xTicker(
+        new QCPAxisTickerFixed
+        );
+
+    xTicker->setScaleStrategy(QCPAxisTickerFixed::ssNone);
+
+    ui->Plot->xAxis->setTicker(xTicker);
+
+    ui->Plot->xAxis->setBasePen(
+        QPen(axisColor)
+        );
+
+    ui->Plot->xAxis->setTickPen(
+        QPen(axisColor)
+        );
+
+    ui->Plot->xAxis->setTickLabelColor(
+        axisColor
+        );
+
+    ui->Plot->xAxis->grid()->setPen(
+        QPen(gridColor)
+        );
+
+    ui->Plot->xAxis->grid()->setSubGridPen(
+        QPen(subGridColor)
+        );
+
+    ui->Plot->xAxis->setTickLabelSide(
+        QCPAxis::lsOutside
+        );
+
+
+    // ---------------- Y AXIS ----------------
+
+    QSharedPointer<QCPAxisTickerFixed> yTicker(
+        new QCPAxisTickerFixed
+        );
+
+    yTicker->setScaleStrategy(QCPAxisTickerFixed::ssNone);
+
+    ui->Plot->yAxis->setTicker(yTicker);
+
+    ui->Plot->yAxis->setBasePen(
+        QPen(axisColor)
+        );
+
+    ui->Plot->yAxis->setTickPen(
+        QPen(axisColor)
+        );
+
+    ui->Plot->yAxis->setTickLabelColor(
+        axisColor
+        );
+
+    ui->Plot->yAxis->grid()->setPen(
+        QPen(gridColor)
+        );
+
+    ui->Plot->yAxis->grid()->setSubGridPen(
+        QPen(subGridColor)
+        );
+
+    ui->Plot->yAxis->setTickLabelSide(
+        QCPAxis::lsOutside
+        );
+
+
+    // ---------------- RANGE CHANGE ----------------
+
+    connect(
+        ui->Plot->xAxis,
+        SIGNAL(rangeChanged(QCPRange)),
+        this,
+        SLOT(updateGridInterval())
+        );
+
+    connect(
+        ui->Plot->yAxis,
+        SIGNAL(rangeChanged(QCPRange)),
+        this,
+        SLOT(updateGridInterval())
+        );
+
+
+    ui->Plot->xAxis->setRange(0, 100);
+    ui->Plot->yAxis->setRange(0, 100);
+
+    ui->Plot->replot();
+}
+
+void TestScreen::onSocketReadyRead(quint8 key)
+{
+    // QByteArray data = client->readAll();
+    // if (data.isEmpty()) return;
+
+    // quint8 key = static_cast<quint8>(data.at(0));
+    qDebug() << "Received key (hex):" << QString("0x%1").arg(key, 2, 16, QLatin1Char('0')).toUpper();
+
+    /* -----------------------------------------
+     * 1) ESC key — highest priority handling
+     * ----------------------------------------- */
+    if (key == ESC)
+    {
+        qDebug() << "ESC key pressed";
+
+        if (previewscreen != nullptr) {
+            if(previewscreen->isVisible()){
+                previewscreen->close();
+                previewscreen = nullptr;
+            }
+            return;
+        }
+        if (testdetails != nullptr) {
+            if(testdetails->isVisible()){
+            testdetails->close();
+            testdetails = nullptr;
+            if(!plotUpdateTimer->isActive())
+            {
+                plotUpdateTimer->start(20);
+                ui->label_pause->setVisible(false);
+            }
+            setInputFieldsEnabled(true);
+            }
+            return;
+        }
+
+    }
+
+    /* -----------------------------------------
+     * 2) Forward key to the screen currently open
+     *    Priority: Preview → TestDetails → Openlog
+     * ----------------------------------------- */
+    if (previewscreen != nullptr) {
+        if( previewscreen->isVisible()){
+        previewscreen->handleSocketKey(static_cast<int>(key));
+        }
+        return;
+    }
+
+    if (testdetails !=nullptr ) {
+        if(testdetails->isVisible()){
+        testdetails->handleSocketKey(static_cast<int>(key));
+        }
+        return;
+    }
+
+    // ---------------------------------------------------------
+    // RECORDING MODE KEY LOCK
+    // ---------------------------------------------------------
+    // When recording is active, ONLY these keys are allowed:
+    //
+    // 7, 8, 9
+    // RUN
+    // FREEZE
+    // SAVE
+    // UP, DOWN
+    // LEFT, RIGHT
+    // INC, DEC
+    //
+    // All other keys are ignored.
+    // ---------------------------------------------------------
+
+    if (ui->label_record->isVisible())
+    {
+        bool allowedKey =
+            (key == '7') ||
+            (key == '8') ||
+            (key == '9') ||
+            (key == RUN) ||
+            (key == FREEZE) ||
+            (key == SAVE) ||
+            (key == UP) ||
+            (key == DOWN) ||
+            (key == LEFT) ||
+            (key == RIGHT) ||
+            (key == INC) ||
+            (key == REC) ||
+            (key == DEC);
+
+        if (!allowedKey)
+        {
+            qDebug() << "[Recording] Ignoring key:"
+                     << QString("0x%1")
+                            .arg(key, 2, 16, QLatin1Char('0'));
+            return;
+        }
+
+        // Never allow a QLineEdit to retain focus
+        QWidget *focusedWidget = this->focusWidget();
+
+        if (qobject_cast<QLineEdit *>(focusedWidget))
+        {
+            focusedWidget->clearFocus();
+            ui->Plot->setFocus(Qt::OtherFocusReason);
+        }
+
+        // During recording the gate must always be selected.
+        if (!gate1_focus && !gate2_focus)
+        {
+            gate1_focus = true;
+            gate2_focus = false;
+
+            CalGateCnt = 1;
+
+            g1border->setVisible(true);
+            g2border->setVisible(false);
+
+            ui->label_offset->setVisible(false);
+
+            focusGate1(1);
+        }
+    }
+
+    if (key == ESC){
+        qDebug() << "ESC pressed on TestScreen (no popup)";
+        plotUpdateTimer->stop();
+        BuzzerOn(false);
+        emit closeTestScreen();
+        return;
+    }
+
+    /* -----------------------------------------
+     * 3) No popup active → TestScreen key operations
+     * ----------------------------------------- */
+    switch (key)
+    {
+    case CHANNEL:
+        channelCnt++;
+        if(channelCnt == 1){
+            receivedChannel = "1";
+            ui->lineEdit_ch->setText(receivedChannel);
+            //entry.channel = 1;
+            config.channel = 1;
+            autoRunConfig();
+            onApplyGainClicked();
+
+        }
+        else if(channelCnt == 2){
+            receivedChannel = "2";
+            ui->lineEdit_ch->setText(receivedChannel);
+            // entry.channel = 2;
+            config.channel = 2;
+            autoRunConfig();
+            onApplyGainClicked();
+
+            channelCnt=0;
+        }
+        break;
+
+    case FREEZE: // Freeze
+        if(isCalibrationRecent(ui->lineEdit_ch->text().toInt(),ui->lineEdit_calset->text().toInt())){
+            if(ui->label_freeze->isVisible())
+            {
+               ui->label_freeze->setVisible(false);
+            }
+            else{
+                ui->label_freeze->setVisible(true);
+            }
+            handleFreezeLogic();  // extracted to avoid long code here
+        }
+        else{
+            ui->label_calibWarning->setVisible(true);
+            calibWarningTimer->start(5000);
+        }
+        break;
+
+
+    case VELOCITY:
+        //prepareVelocityInput(); //commented for this revision, will implement this in next release
+        break;
+
+    case ZOOM:
+        if(zoom)
+        {
+            zoom=false;
+        }
+        else{
+            zoom =true;
+        }
+        break;
+
+    case CALSET:
+        qDebug() <<"calset Active";
+        prepareCalsetInput();
+        onApplyGainClicked();
+        break;
+
+    case GATE:
+        CalGateCnt ++;
+        if(CalGateCnt == 1)
+        {
+            if (m_currentLogicalFocus)
+            {
+                m_currentLogicalFocus->setStyleSheet("");
+                m_currentLogicalFocus = nullptr;
+            }
+
+            // Remove actual Qt focus
+            QWidget *focusedWidget = this->focusWidget();
+
+            if (focusedWidget)
+            {
+                if (QLineEdit *lineEdit =
+                    qobject_cast<QLineEdit *>(focusedWidget))
+                {
+                    lineEdit->clearFocus();
+                }
+            }
+
+            gate1_focus=true;
+            gate2_focus=false;
+            ui->lineEdit_calset->setStyleSheet("");
+            g1border->setVisible(true);
+            g2border->setVisible(false);
+            focusGate1(1);
+        }
+        else if(CalGateCnt == 2)
+        {
+            if (m_currentLogicalFocus)
+            {
+                m_currentLogicalFocus->setStyleSheet("");
+                m_currentLogicalFocus = nullptr;
+            }
+
+            // Remove actual Qt focus
+            QWidget *focusedWidget = this->focusWidget();
+
+            if (focusedWidget)
+            {
+                if (QLineEdit *lineEdit =
+                    qobject_cast<QLineEdit *>(focusedWidget))
+                {
+                    lineEdit->clearFocus();
+                }
+            }
+
+            gate1_focus=false;
+            gate2_focus=true;
+            ui->lineEdit_calset->setStyleSheet("");
+            g1border->setVisible(false);
+            g2border->setVisible(true);
+            focusGate2(1);
+        }
+        else if(CalGateCnt == 3)
+        {
+            gate1_focus=false;
+            gate2_focus=false;
+            g1border->setVisible(false);
+            g2border->setVisible(false);
+            ui->label_offset->setVisible(false);
+            g1border->data()->clear();
+            g2border->data()->clear();
+            ui->Plot->replot();
+            CalGateCnt = 0;
+        }
+        break;
+
+    case AUDIO:
+        adjustAudioLevel();
+        break;
+
+    case RUN:
+        if (plotUpdateTimer->isActive() )
+        {
+            plotUpdateTimer->stop();
+            plotGate1(1,10);
+            plotGate2(1,10);
+            ui->label_pause->setVisible(true);
+        }
+        else{
+            plotUpdateTimer->start(20);
+            ui->label_pause->setVisible(false);
+        }
+        break;
+
+    case SAVE:
+        if(isCalibrationRecent(ui->lineEdit_ch->text().toInt(),ui->lineEdit_calset->text().toInt())){
+            if(isBuzzerOn())
+            {
+                BuzzerOn(false);
+            }
+            handleSaveFlow();
+        }
+        else{
+            ui->label_calibWarning->setVisible(true);
+            calibWarningTimer->start(5000);
+        }
+
+        break;
+
+    case UP:
+        if (gate1_focus || gate2_focus)
+        {
+            HandleGateUpDownLift(1);
+        }
+        else if (!isRecording())
+        {
+            navigateFocusVertical(-1);
+        }
+        break;
+
+    case DOWN:
+        if (gate1_focus || gate2_focus)
+        {
+            HandleGateUpDownLift(-1);
+        }
+        else if (!isRecording())
+        {
+            navigateFocusVertical(1);
+        }
+        break;
+
+    case REC:
+    {
+        int channel = ui->lineEdit_ch->text().toInt();
+        int calset  = ui->lineEdit_calset->text().toInt();
+
+        QString calibrationDate =
+            getRecentCalibrationDate(channel, calset);
+
+        if (ui->label_record->isVisible())
+        {
+            ui->label_record->setVisible(false);
+            logfile.close();
+
+            recordingFlag.clear();
+
+            ui->label_flag->clear();
+            ui->label_flag->setVisible(false);
+
+            gate1_focus=false;
+            gate2_focus=false;
+            g1border->setVisible(false);
+            g2border->setVisible(false);
+            ui->label_offset->setVisible(false);
+            g1border->data()->clear();
+            g2border->data()->clear();
+            ui->Plot->replot();
+
+            break;
+        }
+
+
+
+        if (!calibrationDate.isEmpty())
+        {
+                ui->label_record->setVisible(true);
+
+                // ---------------------------------------------------------
+                // Recording starts
+                // ---------------------------------------------------------
+
+                // Gate 1 must become the active gate
+                if (!gate1_focus && !gate2_focus)
+                {
+                    gate1_focus = true;
+                    gate2_focus = false;
+
+                    CalGateCnt = 1;
+
+                    g1border->setVisible(true);
+                    g2border->setVisible(false);
+
+                    ui->label_offset->setVisible(false);
+
+                    focusGate1(1);
+                }
+
+                // ---------------------------------------------------------
+                // Clear previous LineEdit logical + real focus
+                // ---------------------------------------------------------
+
+                // Remove old logical focus highlight
+                if (m_currentLogicalFocus)
+                {
+                    m_currentLogicalFocus->setStyleSheet("");
+                    m_currentLogicalFocus = nullptr;
+                }
+
+                // Remove actual Qt focus
+                QWidget *focusedWidget = this->focusWidget();
+
+                if (focusedWidget)
+                {
+                    if (QLineEdit *lineEdit =
+                        qobject_cast<QLineEdit *>(focusedWidget))
+                    {
+                        lineEdit->clearFocus();
+                    }
+                }
+
+                // Give Qt focus to the plot
+                ui->Plot->setFocus(Qt::OtherFocusReason);
+
+                recordingFlag.clear();
+                ui->label_flag->clear();
+                ui->label_flag->setVisible(false);
+
+                handleRecording();
+
+                break;
+            }
+        else
+        {
+            ui->label_calibWarning->setVisible(true);
+            calibWarningTimer->start(5000);
+            break;
+        }
+    }
+
+
+    case SD_MODE:
+
+        ModeCnt ++;
+
+        if(ModeCnt == 1)
+        {
+            ui->lineEdit_Mode->setText("SC");
+        }
+        else if(ModeCnt == 2)
+        {
+            ui->lineEdit_Mode->setText("DC");
+            ModeCnt = 0;
+        }
+
+        break;
+
+    case OK:  // OK key
+    {
+        qDebug() << "OK Pressed";
+        if(calibWarningTimer->isActive()){
+            return;
+        }
+
+        const QByteArray selectedPosition = ui->comboBox_pos->currentText().trimmed().toLocal8Bit();
+        qstrncpy(config.position, selectedPosition.constData(), sizeof(config.position));
+
+        if(updateConfigFile("Config.txt",config))
+        {
+            qDebug() << "Config.txt Updated";
+            ui->label_configStatus->setText("Config updated");
+            saveCalibrationHistory();
+
+            ui->label_configStatus->setStyleSheet(
+                "color: #00ff66;"
+                "font-size: 11px;"
+                "font-weight: bold;");
+            configStatusTimer->start(4000);
+        }else{
+            qDebug() << "Config.txt Update failed";
+            ui->label_configStatus->setText("Config update failed");
+
+            ui->label_configStatus->setStyleSheet(
+                "color: red;"
+                "font-size: 11px;"
+                "font-weight: bold;");
+            configStatusTimer->start(4000);
+        }
+
+        // 2️⃣ For line edits and other widgets, just save / apply
+        // saveTo_entry();
+        // autoRunConfig();
+        // onApplyGainClicked();
+    }
+    break;
+
+
+    case BACKSPACE: // Backspace
+        handleBackspaceInput();
+        break;
+
+    case DEC: // '-'
+        adjustCurrentLineEdit(-1);
+        break;
+
+    case INC: // '+'
+        adjustCurrentLineEdit(1);
+        break;
+
+    case LEFT:
+        if (gate1_focus || gate2_focus)
+        {
+            HandleGateShift(-1);
+        }
+        else if (!isRecording())
+        {
+            FunctionLeftRight(false);
+        }
+        break;
+
+    case RIGHT:
+        if (gate1_focus || gate2_focus)
+        {
+            HandleGateShift(1);
+        }
+        else if (!isRecording())
+        {
+            FunctionLeftRight(true);
+        }
+        break;
+
+    case '7':
+    {
+        if (isRecording())
+        {
+            recordingFlag = "DFWO";
+
+            ui->label_flag->setText(recordingFlag);
+            ui->label_flag->setVisible(true);
+
+            logfile.setFlag(recordingFlag, "F7");
+
+            qDebug() << "[Recording] Flag 7 ->"
+                     << recordingFlag;
+        }
+
+        break;
+    }
+
+    case '8':
+    {
+        if (isRecording())
+        {
+            recordingFlag = "DFWR";
+
+            ui->label_flag->setText(recordingFlag);
+            ui->label_flag->setVisible(true);
+
+            logfile.setFlag(recordingFlag, "F8");
+
+            qDebug() << "[Recording] Flag 8 ->"
+                     << recordingFlag;
+        }
+
+        break;
+    }
+
+    case '9':
+    {
+        if (isRecording())
+        {
+            recordingFlag = "DFWN";
+
+            ui->label_flag->setText(recordingFlag);
+            ui->label_flag->setVisible(true);
+
+            logfile.setFlag(recordingFlag, "F9");
+
+            qDebug() << "[Recording] Flag 9 ->"
+                     << recordingFlag;
+        }
+
+        break;
+    }
+
+    default:
+        if (testdetails && testdetails->isVisible())
+        {
+            //qDebug() << "handle sockey key event" << key;
+            testdetails->handleSocketKey(key);
+        }
+
+        if (isRecording())
+        {
+            return;
+        }
+        // 🔹 Decide based on current screen whether we want digits or alphas
+        QLineEdit* focused = qobject_cast<QLineEdit*>(this->focusWidget());
+
+        if (focused)
+        {
+            // Example: numeric-only fields
+            if (focused == ui->lineEdit_calset ||
+                focused == ui->lineEdit_Velocity||
+                focused == ui->lineEdit_Gain   ||
+                focused == ui->lineEdit_Range  ||
+                focused == ui->lineEdit_Delay  ||
+                focused == ui->lineEdit_Reject ||
+                focused == ui->lineEdit_Angle  ||
+                focused == ui->lineEdit_G1ST   ||
+                focused == ui->lineEdit_G1ED   ||
+                focused == ui->lineEdit_TH1    ||
+                focused == ui->lineEdit_G2ST   ||
+                focused == ui->lineEdit_G2ED   ||
+                focused == ui->lineEdit_TH2)
+            {
+                int mapped = normalizeKeyForNumeric(key);
+                if (mapped != -1)
+                {
+
+                    handleDigitInput(mapped - '0');  // '1' -> 1
+                   // saveTo_entry();
+                    autoRunConfig();
+                    onApplyGainClicked();
+
+                }
+                else
+                {
+                    //qDebug() << "Ignored non-numeric key:" << (char)key;
+                }
+            }
+            else
+            {
+                // Example: alphabet fields (like operator name)
+                handleOtherScreenKeys(key);
+            }
+        }
+        break;
+
+    }
+}
+
+
+
+
+void TestScreen::handleFreezeLogic(void)//Varun added to handle freeze logic
+{
+    if (!shared) return;
+
+    QVector<QPointF> filtered;
+    if (getFilteredPoints(config, filtered) == 0)
+        return;
+
+    // // -------- DEBUG FINAL INPUT --------
+    // static int dbg = 0;
+    // if ((dbg++ % 200) == 0)
+    // {
+    //     printf("[PLOT] %u:%u %u:%u %u:%u\n",
+    //            DBG_I1, (DBG_I1 < filtered.size()) ? int(filtered[DBG_I1].y()) : 0,
+    //            DBG_I2, (DBG_I2 < filtered.size()) ? int(filtered[DBG_I2].y()) : 0,
+    //            DBG_I3, (DBG_I3 < filtered.size()) ? int(filtered[DBG_I3].y()) : 0);
+    // }
+
+    //QVector<double> xData, yData;
+    // xDataFreeze.reserve(filtered.size());
+    // yDataFreeze.reserve(filtered.size());
+    xDataFreeze.resize(filtered.size());
+    yDataFreeze.resize(filtered.size());
+
+    maxX = 0;
+    maxY = 0;
+
+    // -----------------------------
+    // Convert raw points → normalized arrays
+    // -----------------------------
+    // for (const QPointF& p : filtered)
+
+    for (int i =0; i< filtered.size();i++)
+    {
+        double addr = filtered[i].x();
+        double val  = (filtered[i].y() / 255.0) * 100.0;
+
+        xDataFreeze[i]=addr;
+        if(yDataFreeze[i]<val)
+        {
+            yDataFreeze[i] = val;
+        }
+
+
+        // maxX = qMax(maxX, int(addr));
+        // maxY = qMax(maxY, val);
+
+        maxX = qMax<double>(maxX, double(addr));
+        maxY = qMax<double>(maxY, val);
+    }
+
+    if (xDataFreeze.isEmpty()) return;
+
+    // Normalize X values
+    QVector<double> xNorm;
+    xNorm.reserve(xDataFreeze.size());
+    // for (double a : xDataFreeze)
+    //     xNorm.append(a / RANGE_FACTOR);
+
+    for (double a : xDataFreeze)
+    {
+        config.Angle<=30 ? xNorm.append(a / RANGE_FACTOR_LT30) : xNorm.append(a / RANGE_FACTOR_GT30);
+
+    }
+    // -----------------------------
+    // Compute G1/G2 range windows
+    // -----------------------------
+    double g1Start = (config.g1_start * config.range) / 100.0;
+    double g1End   = (config.g1_end   * config.range) / 100.0;
+
+    double g2Start = (config.g2_start * config.range) / 100.0;
+    double g2End   = (config.g2_end   * config.range) / 100.0;
+
+    // -----------------------------
+    // Peak detection
+    // -----------------------------
+    phValue = 0;
+    peakIndex = -1;
+
+    for (int i = 0; i < xNorm.size(); i++)
+    {
+        if (yDataFreeze[i] > phValue)
+        {
+            peakIndex = i;
+            phValue = qMax(phValue, yDataFreeze[i]);
+        }
+    }
+
+    // -----------------------------
+    // Update UI
+    // -----------------------------
+
+    int Lm=0,Rm=0, count = (int)config.range / 20;
+    for(int i = peakIndex;i>=0;i--)
+    {
+        if(yDataFreeze[i] == 0)
+        {
+            if(count == ((int)config.range /20))
+            {
+                Lm = xNorm[i] * 100 / config.range;
+            }
+            else if(count == 0){
+                break;
+            }
+            count--;
+        }
+        else{
+            count = config.range / 20;
+        }
+    }
+
+    count = config.range /20;
+
+    for(int i =peakIndex;i<xNorm.size();i++)
+    {
+        if(yDataFreeze[i] == 0)
+        {
+            if(count == ((int)config.range /20))
+            {
+                Rm = xNorm[i] * 100 / config.range;
+            }
+            else if(count == 0){
+                break;
+            }
+            count--;
+        }
+        else{
+            count = config.range / 20;
+        }
+    }
+    ui->lineEdit_PH2->hide();
+    ui->lineEdit_BP2->hide();
+    ui->lineEdit_D2->hide();
+    ui->lineEdit_BP2->hide();
+    ui->label_P2P->setText("Hm");
+    ui->lineEdit->setText(QString::number(Lm)+"-"+QString::number(Rm));
+
+    ui->lineEdit_PH1->setText(QString::number(ph1Value, 'f', 0));
+    ui->lineEdit_BP1->setText(QString::number(xNorm[peakIndex], 'f', 0));
+    ui->lineEdit_D1->setText(QString::number(xNorm[peakIndex] * cos(config.Angle * M_PI / 180.0), 'd', 0));
+    ui->lineEdit_SD1->setText(QString::number(xNorm[peakIndex] * sin(config.Angle * M_PI / 180.0), 'd', 0));
+
+    g1Line->data()->clear();
+    g2Line->data()->clear();
+    waveformGraph->data()->clear();
+
+    // -----------------------------
+    // Plot Update (no crashes)
+    // -----------------------------
+    g1Line->setData(QVector<double>{g1Start, g1End},
+                    QVector<double>{(double)config.th1, (double)config.th1});
+
+    g2Line->setData(QVector<double>{g2Start, g2End},
+                    QVector<double>{(double)config.th2, (double)config.th2});
+    waveformGraph->setData(xNorm, yDataFreeze);
+
+    ui->Plot->replot();
+}
+
+
+void TestScreen::prepareVelocityInput(void)
+{
+    setLogicalFocus(ui->lineEdit_Velocity);
+
+    ui->lineEdit_Velocity->setEnabled(true);
+    ui->lineEdit_Velocity->clear();
+
+    inputStates[ui->lineEdit_Velocity].timer.start();
+    QString buffer = inputStates[ui->lineEdit_Velocity].inputBuffer;
+}
+
+void TestScreen::prepareCalsetInput()
+{
+    qDebug() << "Entered into calset";
+
+    // 🔹 Logical focus + highlight
+    setLogicalFocus(ui->lineEdit_calset);
+    // 🔹 Enable the widget
+    ui->lineEdit_calset->setEnabled(true);
+    autoRunConfig();
+    // 🔹 Clear or reset your input tracking
+    // calsetStr.clear();
+    // calsetState.pressCount = 0;
+    // calsetState.timer.start(); // start timing from now
+
+    // inputStates[ui->lineEdit_calset].inputBuffer.clear();
+    // inputStates[ui->lineEdit_calset].timer.start();
+}
+
+void TestScreen::adjustAudioLevel(void)
+{
+    // Audio is stored as percentage: 0-100
+    AudioLevel = settings::audioLevel();
+
+    // Move to next 25% level.
+    // This matches the four audio indicator steps.
+    if (AudioLevel < 25)
+        AudioLevel = 25;
+    else if (AudioLevel < 50)
+        AudioLevel = 50;
+    else if (AudioLevel < 75)
+        AudioLevel = 75;
+    else if (AudioLevel < 100)
+        AudioLevel = 100;
+    else
+        AudioLevel = 0;
+
+    // Save through the same QSettings key used by Settings.
+    QSettings s(ORG_NAME, APP_NAME);
+    s.setValue("audio/level", AudioLevel);
+    s.sync();
+
+    // 0-100% -> 0-1,000,000 duty
+    const int duty = AudioLevel * 10000;
+
+    BuzzerDuty(duty);
+
+    m_audioPercent = static_cast<float>(AudioLevel);
+
+    ui->label_audioIndicator->update();
+
+    qDebug() << "[Audio]"
+             << "Level =" << AudioLevel
+             << "%"
+             << "Duty =" << duty;
+}
+
+void TestScreen::handleSaveFlow()
+{
+  // saveTo_entry();  // Always save key press
+    //updateConfigFile("Config.txt",config);
+    qDebug() << "Save button triggered";
+  // QPixmap pixmap = this->grab();
+
+  // // --- Adjust JPG output size ---
+  // QSize jpgTargetSize(640, 480); // You can change this (640x480, 1024x768, etc.)
+  // QPixmap scaledJpg = pixmap.scaled(jpgTargetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+  // QString jpgFileName = QString("TestScreen.jpg");
+  //scaledJpg.save(jpgFileName, "JPG", 100 );
+    // -------- CASE 1: PreviewScreen is open --------
+    if (previewscreen && previewscreen->isVisible()) {
+        qDebug() << "Saving from PreviewScreen and returning to TestScreen";
+
+        // ⬅️ Add preview save logic if required
+
+        previewscreen->close();
+        previewscreen = nullptr;
+
+        if (testdetails) {
+            testdetails->close();
+            testdetails = nullptr;
+        }
+        if (!plotUpdateTimer->isActive())
+        {
+            plotUpdateTimer->start(20);
+            if(ui->label_pause->isVisible()) // if pause is enabled and he have saved from preview screen the label should not be visible
+            {
+                ui->label_pause->setVisible(false);
+            }
+        }
+
+        setInputFieldsEnabled(true);
+        return;
+    }
+
+    // -------- CASE 2: TestDetails is open --------
+    if (testdetails && testdetails->isVisible()) {
+        qDebug() << "Saving from TestDetails";
+        // ⬅️ Add TestDetail save logic if required
+        // testdetails->saveDetails();
+        return;
+    }
+
+    // -------- CASE 3: No screens open → open TestDetails --------
+    qDebug() << "Opening TestDetails from TestScreen";
+
+    if (!testdetails) {
+        testdetails = new TestDetails(this);
+        testdetails->setAttribute(Qt::WA_DeleteOnClose);
+
+        if(plotUpdateTimer->isActive())
+        {
+            plotUpdateTimer->stop();
+        }
+
+        setInputFieldsEnabled(false);
+
+        connect(testdetails, &QObject::destroyed, this, [this]() {
+            qDebug() << "TestDetails closed";
+            setInputFieldsEnabled(true);
+            testdetails = nullptr;
+        });
+
+        // ---- Connect TestDetails → open PreviewScreen ----
+        connect(testdetails, &TestDetails::requestPreview, this, [this]() {
+            if (!previewscreen) {
+                previewscreen = new PreviewScreen(this);
+                previewscreen->setAttribute(Qt::WA_DeleteOnClose);
+
+                // ✅ ADD THIS CONNECTION
+                connect(previewscreen,&PreviewScreen::requestTestScreen,                            // fall back to Test screen
+                        this,
+                        &TestScreen::handleSaveFlow);
+
+                connect(previewscreen, &QObject::destroyed, this, [this]() {
+                    qDebug() << "PreviewScreen closed";
+                    previewscreen = nullptr;
+                });
+            }
+            previewscreen->show();
+            // previewscreen->raise();
+            // previewscreen->activateWindow(); //Commented bcoz of warning by wayland
+        });
+    }
+
+    testdetails->show();
+    // testdetails->raise();
+    // testdetails->activateWindow();
+}
+
+int TestScreen::normalizeKeyForNumeric(uint8_t key)
+{
+    //qDebug() << "normalfun\n";
+    if (key >= '0' && key <= '9') {
+        return key;  // already digit
+    }
+
+    switch (key)
+    {
+
+    case 'A': case 'B': case 'C': return '1';
+    case 'D': case 'E': case 'F': return '2';
+    case 'G': case 'H': case 'I': return '3';
+    case 'J': case 'K': case 'L': return '4';
+    case 'M': case 'N': case 'O': return '5';
+    case 'P': case 'Q': case 'R': case 'S': return '6';
+    case 'T': case 'U': case 'V': return '7';
+    case 'W': case 'X': case 'Y': case 'Z': return '8';
+    case '-': return '9';  // if you want '-' as 9
+
+    }
+
+    return -1;  // invalid
+}
+
+
+
+void TestScreen::handleOtherScreenKeys(uint8_t key)
+{
+    // Map letters and '-' to digits
+    if (key == 0x31 || (key >= 0x41 && key <= 0x43))       key = 0x31;
+    else if (key == 0x32 || (key >= 0x44 && key <= 0x46))  key = 0x32;
+    else if (key == 0x33 || (key >= 0x47 && key <= 0x49))  key = 0x33;
+    else if (key == 0x34 || (key >= 0x4A && key <= 0x4C))  key = 0x34;
+    else if (key == 0x35 || (key >= 0x4D && key <= 0x4F))  key = 0x35;
+    else if (key == 0x36 || (key >= 0x50 && key <= 0x53))  key = 0x36;
+    else if (key == 0x37 || (key >= 0x54 && key <= 0x56))  key = 0x37;
+    else if (key == 0x38 || (key >= 0x57 && key <= 0x5A))  key = 0x38;
+    else if (key == 0x39 || (key == 0x2D))                 key = 0x39;
+
+    //qDebug() << "calset keypress (mapped to digit):" << (char)key;
+    handleDigitInput(key - 0x30);
+}
+
+
+
+void TestScreen::autoRunConfig()
+{
+    //qDebug() << "Entered into auto config";
+
+    int Userinputs_pre[3];
+
+    Userinputs_pre[0] = ui->lineEdit_ch->text().toInt();        // channel
+    Userinputs_pre[1] = ui->lineEdit_calset->text().toInt();    // calset
+
+    if (Userinputs_pre[0] != userinput_prv[0] || Userinputs_pre[1] != userinput_prv[1])
+    {
+        getconfig(Userinputs_pre[1], Userinputs_pre[0], &config);
+
+        qDebug() << "Changed config inputs";
+        qDebug() << "pre Ch" << Userinputs_pre[0] << "pre Cal" << Userinputs_pre[1];
+        qDebug() << "prv Ch" << userinput_prv[0] << "prv Cal" << userinput_prv[1];
+
+        // Update previous
+        userinput_prv[0] = Userinputs_pre[0];
+        userinput_prv[1] = Userinputs_pre[1];
+    }
+
+
+    //config.reject = config.reject / REJECT_FACTOR;
+    //config.Gain   = config.Gain / GAIN_FACTOR;
+
+    ui->lineEdit_Range->setText(QString::number(config.range, 'd', 0));
+    ui->lineEdit_Delay->setText(QString::number(config.delay, 'd', 0));
+    ui->lineEdit_Reject->setText(QString::number(config.reject, 'd', 0));
+    ui->lineEdit_Gain->setText(QString::number(config.Gain));
+    ui->lineEdit_Angle->setText(QString::number(config.Angle));
+
+    ui->lineEdit_G1ST->setText(QString::number(config.g1_start));
+    ui->lineEdit_G1ED->setText(QString::number(config.g1_end));
+    ui->lineEdit_TH1->setText(QString::number(config.th1));
+
+    ui->lineEdit_G2ST->setText(QString::number(config.g2_start));
+    ui->lineEdit_G2ED->setText(QString::number(config.g2_end));
+    ui->lineEdit_TH2->setText(QString::number(config.th2));
+    //ui->lineEdit_Velocity->setText(QString::number(UserVelocity, 'd', 0));
+        if (config.Angle>=30){
+            ui->lineEdit_Velocity->setText("3230");
+        }
+        else{
+            ui->lineEdit_Velocity->setText("5920");
+        }
+    //qDebug() << "autoconf" << config.range;
+
+    QString savedPosition = QString::fromLocal8Bit(config.position).trimmed();
+
+        // Handle a trailing comma if the parser includes it.
+    if (savedPosition.endsWith(','))
+        savedPosition.chop(1);
+
+    const int positionIndex = ui->comboBox_pos->findText(
+            savedPosition,
+            Qt::MatchFixedString | Qt::MatchCaseSensitive);
+
+    if (positionIndex >= 0)
+        ui->comboBox_pos->setCurrentIndex(positionIndex);
+    else
+        qWarning() << "Unknown position in Config.txt:" << savedPosition;
+
+    ui->Plot->xAxis->setRange(0, config.range);  // optional
+    ui->Plot->yAxis->setRange(0, 100);
+
+    saveConfigToFile();
+
+}
+
+
+
+
+void TestScreen::updateGraphWithData()
+{
+    QElapsedTimer timer;
+    timer.start();
+    if (!shared) return;
+
+    QVector<QPointF> filtered;
+    if (getFilteredPoints(config, filtered) == 0)
+        return;
+
+    // // -------- DEBUG FINAL INPUT --------
+    // static int dbg = 0;
+    // if ((dbg++ % 200) == 0)
+    // {
+    //     printf("[PLOT] %u:%u %u:%u %u:%u\n",
+    //            DBG_I1, (DBG_I1 < filtered.size()) ? int(filtered[DBG_I1].y()) : 0,
+    //            DBG_I2, (DBG_I2 < filtered.size()) ? int(filtered[DBG_I2].y()) : 0,
+    //            DBG_I3, (DBG_I3 < filtered.size()) ? int(filtered[DBG_I3].y()) : 0);
+    // }
+
+    xData={0};
+    xNorm={0};
+    yData={0};
+    yDataa.clear();
+
+    xData.resize(filtered.size());
+    yData.resize(filtered.size());
+    yDataa.resize(filtered.size());
+    xNorm.resize(filtered.size());
+
+    maxX = 0;
+    maxY = 0;
+    bool g1buzon=false;
+    bool g2buzon=false;
+
+    // Normalize X values
+    //QVector<double> xNorm;
+    //xNorm.resize(xData.size());
+    // -----------------------------
+    // Compute G1/G2 range windows
+    // -----------------------------
+    double g1Start = (config.g1_start * config.range) / 100.0;
+    double g1End   = (config.g1_end   * config.range) / 100.0;
+
+    double g2Start = (config.g2_start * config.range) / 100.0;
+    double g2End   = (config.g2_end   * config.range) / 100.0;
+
+    // -----------------------------
+    // Peak detection
+    // -----------------------------
+    ph1Value = ph2Value = 0;
+    peakIndex1 = peakIndex2 = -1;
+
+    for (int i = 0; i < filtered.size(); i++)
+    {
+        double addr = filtered[i].x();
+        double val  = (filtered[i].y() / 255.0) * 100.0;
+
+        xData[i]  = addr;
+       // config.Angle<=30 ? xNorm.append(xData[i] / RANGE_FACTOR_LT30) : xNorm.append(xData[i] / RANGE_FACTOR_GT30);
+
+        config.Angle<=30 ? xNorm[i]=(xData[i] / RANGE_FACTOR_LT30) :  xNorm[i]=(xData[i] / RANGE_FACTOR_GT30);
+        yData[i]  = val;
+        yDataa[i] = static_cast<uint8_t>(val); // one byte, correct value
+
+        if (xNorm[i] >= g1Start && xNorm[i] <= g1End)
+        {
+            if(yData[i]>config.th1)
+            {
+                g1buzon=true;
+            }
+        }
+        if (xNorm[i] >= g2Start && xNorm[i] <= g2End)
+        {
+            if(yData[i]>config.th2)
+            {
+                g2buzon=true;
+            }
+        }
+        maxX = qMax<double>(maxX, double(addr));
+        maxY = qMax<double>(maxY, val);
+    }
+
+    if (xData.isEmpty()) return;
+    ///qDebug() << "XdataSize"<< xData.size()<<"XnormSize"<< xNorm.size()<<"ydataSize" << yData.size();
+    static int k =0;
+    if(g1buzon || g2buzon)
+    {
+        if(!isBuzzerOn()){
+            BuzzerOn(true);
+            ui->lineEdit_ch->setStyleSheet(        "background-color: red;"
+                                           "border: 2px solid black;");
+        }
+    }
+    else{
+        if(isBuzzerOn()){
+            BuzzerOn(false);
+            ui->lineEdit_ch->setStyleSheet("");
+        }
+    }
+
+    plotGate1(0,k);
+    plotGate2(0,k);//displaying ph values for every 10 iterations (10 * 20ms = 200ms)
+    if(k==10)
+    {
+        k=0;
+    }
+    else{
+    k++;
+    }
+
+    // -----------------------------
+    // Update UI
+    // -----------------------------
+    //VARUN Added since we are hiding these widgets while freezing
+    if(!ui->lineEdit_PH2->isVisible())ui->lineEdit_PH2->setVisible(true);
+    if(!ui->lineEdit_BP2->isVisible())ui->lineEdit_BP2->setVisible(true);
+    if(!ui->lineEdit_D2->isVisible())ui->lineEdit_D2->setVisible(true);
+    if(!ui->lineEdit_SD2->isVisible())ui->lineEdit_SD2->setVisible(true);
+    ui->label_P2P->setText("P2P");
+    //Varun ends
+
+    if(ui->label_P2P->isVisible()){
+        ui->label_P2P->setVisible(false);
+        ui->lineEdit->setVisible(false);
+    }
+    //ui->lineEdit->setText(QString::number(fabs(d1 - d2), 'f', 0));
+
+    waveformGraph->data()->clear();
+
+    // -----------------------------
+    // Plot Update (no crashes)
+    // -----------------------------
+    if(zoom){
+        ui->Plot->xAxis->setRange(g1Start,g1End);
+        updateGridInterval();
+        //ui->Plot->xAxis->setRange(g1_start*RANGE_FACTOR,g1_end*RANGE_FACTOR);
+    }
+    else{
+        ui->Plot->xAxis->setRange(0,config.range);
+        updateGridInterval();
+    }
+
+    if (config.channel == 1)
+    {
+        waveformGraph->setPen(
+            QPen(settings::channel1Color(), 2)
+            );
+    }
+    else
+    {
+        waveformGraph->setPen(
+            QPen(settings::channel2Color(), 2)
+            );
+    }
+
+    if(ui->label_record->isVisible())
+    {
+        if(logfile.isOpen())
+            logfile.writeFrame(yDataa);
+    }
+
+    waveformGraph->setData(xNorm, yData);
+
+   ui->Plot->replot();
+    // qDebug() << "updateGraphWithData took"
+    //          << timer.nsecsElapsed() / 1000000.0
+    //          << "ms";
+}
+
+inline void TestScreen::plotGate1(int replotRequired,int ParamCalc)
+{
+    ph1Value = 0;
+    peakIndex1 = -1;
+    //xNorm.reserve(xData.size());
+    double g1Start = (config.g1_start * config.range) / 100.0;
+    double g1End   = (config.g1_end   * config.range) / 100.0;
+
+    for (int i = 0; i < yData.size(); i++)
+    {
+        //config.Angle<=30 ? xNorm.append(xData[i] / RANGE_FACTOR_LT30) : xNorm.append(xData[i] / RANGE_FACTOR_GT30);
+        double x = xNorm[i];
+
+        if (x >= g1Start && x <= g1End)
+        {
+            if (yData[i] > ph1Value){
+                peakIndex1 = i;
+                xPeakIndex1=xNorm[i];
+            }
+
+            ph1Value = qMax(ph1Value, yData[i]);
+        }
+    }
+
+    double bp1 = 0;
+    if (peakIndex1 >= 0)
+        for (int i = peakIndex1; i >= 0; i--)
+            if (yData[i] == 0) { bp1 = xNorm[i]; break; }
+
+
+    double ang = config.Angle * M_PI / 180.0;
+
+    double d1  = bp1 * cos(ang);
+    double sd1 = bp1 * sin(ang);
+    if(ParamCalc == 10){
+    ui->lineEdit_PH1->setText(QString::number(ph1Value, 'f', 0));
+    ui->lineEdit_BP1->setText(QString::number(bp1, 'f', 0));
+    ui->lineEdit_D1->setText(QString::number(d1, 'f', 0));
+    ui->lineEdit_SD1->setText(QString::number(sd1, 'f', 0));
+    }
+    if(gate1_focus){
+        focusGate1(0);
+    }
+    g1Line->data()->clear();
+    g1Line->setData(QVector<double>{g1Start, g1End},
+                    QVector<double>{(double)config.th1, (double)config.th1});
+    if(replotRequired)
+        ui->Plot->replot();
+}
+inline void TestScreen::plotGate2(int replotRequired,int ParamCalc)
+{
+    //QVector<double> xNorm;
+    ph1Value =  0;
+    peakIndex1 =  -1;
+    //xNorm.reserve(xData.size());
+    double g2Start = (config.g2_start * config.range) / 100.0;
+    double g2End   = (config.g2_end   * config.range) / 100.0;
+
+    for (int i = 0; i < yData.size(); i++)
+    {
+        //config.Angle<=30 ? xNorm.append(xData[i] / RANGE_FACTOR_LT30) : xNorm.append(xData[i] / RANGE_FACTOR_GT30);
+        double x = xNorm[i];
+
+        if (x >= g2Start && x <= g2End)
+        {
+            if (yData[i] > ph2Value){
+                peakIndex2 = i;
+            }
+
+            ph2Value = qMax(ph2Value, yData[i]);
+        }
+    }
+    double bp2 = 0;
+    if (peakIndex2 >= 0)
+        for (int i = peakIndex2; i >= 0; i--)
+            if (yData[i] == 0) { bp2 = xNorm[i]; break; }
+
+
+    double ang = config.Angle * M_PI / 180.0;
+
+    double d2  = bp2 * cos(ang);
+    double sd2 = bp2 * sin(ang);
+    if(ParamCalc==10){
+    ui->lineEdit_PH2->setText(QString::number(ph2Value, 'f', 0));
+    ui->lineEdit_BP2->setText(QString::number(bp2, 'f', 0));
+    ui->lineEdit_D2->setText(QString::number(d2, 'f', 0));
+    ui->lineEdit_SD2->setText(QString::number(sd2, 'f', 0));
+    }
+
+    if(gate2_focus){
+        focusGate2(0);
+    }
+    g2Line->data()->clear();
+    g2Line->setData(QVector<double>{g2Start, g2End},
+                    QVector<double>{(double)config.th2, (double)config.th2});
+    if (replotRequired)
+        ui->Plot->replot();
+}
+inline void TestScreen::focusGate1(int replotRequired)
+{
+
+    double g1Start = (config.g1_start * config.range) / 100.0;
+    double g1End   = (config.g1_end   * config.range) / 100.0;
+
+    g1border->data()->clear();
+    g2border->data()->clear();
+    g1border->setData(QVector<double>{g1Start, g1End},
+                      QVector<double>{(double)config.th1, (double)config.th1});
+    if(replotRequired)
+        ui->Plot->replot();
+
+}
+inline void TestScreen::focusGate2(int replotRequired)
+{
+    double g2Start = (config.g2_start * config.range) / 100.0;
+    double g2End   = (config.g2_end   * config.range) / 100.0;
+
+    g1border->data()->clear();
+    g2border->data()->clear();
+    g2border->setData(QVector<double>{g2Start, g2End},
+                      QVector<double>{(double)config.th2, (double)config.th2});
+    if (replotRequired)
+        ui->Plot->replot();
+}
+
+bool TestScreen::updateConfigFile(const QString &filePath, const ConfigEntry &updatedConfig)
+{
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning() << "Cannot open config file for reading:" << file.errorString();
+        return false;
+    }
+
+    QStringList lines;
+    QTextStream in(&file);
+    bool lineUpdated = false;
+
+    const QString selectedPosition =
+        QString::fromLocal8Bit(updatedConfig.position).trimmed();
+
+    if (selectedPosition != "Head" &&
+        selectedPosition != "Web" &&
+        selectedPosition != "Flange") {
+        qWarning() << "Invalid position selected:" << selectedPosition;
+        file.close();
+        return false;
+    }
+
+    while (!in.atEnd()) {
+        QString line = in.readLine();
+        QStringList parts = line.trimmed().split(",", Qt::SkipEmptyParts);
+
+        if (parts.size() == 14) {
+            int calset = parts[0].toInt();
+            int channel = parts[1].toInt();
+
+            // qDebug() << "Calset:" << calset << "Channel:" << channel;
+            // qDebug() << "usercalset:" << updatedConfig.calset << "userChannel:" << updatedConfig.channel;
+
+            if (calset == updatedConfig.calset && channel == updatedConfig.channel) {
+                qDebug() << "Matched line found for update:" << line;
+
+                // Extract existing values
+                double range =updatedConfig.range;
+                double delay = updatedConfig.delay;
+                double reject = updatedConfig.reject;
+                double gain = updatedConfig.Gain;
+
+                // Update config line
+                line = QString("%1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14,")
+                           .arg(calset)
+                           .arg(channel)
+                           .arg(static_cast<int>(range))
+                           .arg(static_cast<int>(delay))
+                           .arg(static_cast<int>(reject))
+                           .arg(updatedConfig.g1_start)
+                           .arg(updatedConfig.g1_end)
+                           .arg(updatedConfig.th1)
+                           .arg(updatedConfig.g2_start)
+                           .arg(updatedConfig.g2_end)
+                           .arg(updatedConfig.th2)
+                           .arg(static_cast<double>(gain))
+                           .arg(static_cast<int>(updatedConfig.Angle))
+                           .arg(selectedPosition);
+                lineUpdated = true;
+            }
+        }
+        lines << line;
+    }
+    file.close();
+
+    if (!lineUpdated) {
+        qWarning() << "No matching calset/channel found in config to update";
+        return false;
+    }
+
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        qWarning() << "Cannot open config file for writing:" << file.errorString();
+        return false;
+    }
+
+    QTextStream out(&file);
+    for (const QString &line : lines)
+    {
+        out << line << "\n";
+    }
+    file.close();
+
+    qDebug() << "Config file updated successfully.";
+    return true;
+}
+
+
+void TestScreen::updateGridInterval()
+{
+    // Update X-axis
+    double xLower = ui->Plot->xAxis->range().lower;
+    double xUpper = ui->Plot->xAxis->range().upper;
+    double xStep = (xUpper - xLower) / 10; // 10 intervals
+
+    QSharedPointer<QCPAxisTickerFixed> xTicker = ui->Plot->xAxis->ticker().staticCast<QCPAxisTickerFixed>();
+    xTicker->setTickStep(xStep);
+
+    // Update Y-axis
+    double yLower = ui->Plot->yAxis->range().lower;
+    double yUpper = ui->Plot->yAxis->range().upper;
+    double yStep = (yUpper - yLower) / 10; // 10 intervals
+
+    QSharedPointer<QCPAxisTickerFixed> yTicker = ui->Plot->yAxis->ticker().staticCast<QCPAxisTickerFixed>();
+    yTicker->setTickStep(yStep);
+
+    ui->Plot->replot();
+}
+
+void TestScreen::HandleGateUpDownLift(int lift){
+
+    QLineEdit* Th;
+    auto adjustlift = [&](auto& field, int minVal, int maxVal) {
+        using T = std::decay_t<decltype(field)>;
+        T current = static_cast<T>(Th->text().toDouble());
+        T newValue = qBound(static_cast<T>(minVal), current + static_cast<T>(lift * 5), static_cast<T>(maxVal));
+        field = newValue;
+        Th->setText(QString::number(newValue, 'f', std::is_floating_point<T>::value ? 1 : 0));
+    };
+
+    if(gate1_focus)
+    {
+        Th = ui->lineEdit_TH1;
+        adjustlift(config.th1,5,99);
+        plotGate1(1,10);
+    }
+    else
+    {
+        Th = ui->lineEdit_TH2;
+        adjustlift(config.th2,5,99);
+        plotGate2(1,10);
+    }
+}
+void TestScreen::HandleGateShift(int shift){
+
+    auto adjustshift = [&](auto& field, int minVal, int maxVal,QLineEdit* L,int k) {
+        using T = std::decay_t<decltype(field)>;
+        T current = static_cast<T>(L->text().toDouble());
+        T newValue = qBound(static_cast<T>(minVal), current + static_cast<T>(shift * k), static_cast<T>(maxVal));
+        field = newValue;
+        L->setText(QString::number(newValue, 'f', std::is_floating_point<T>::value ? 1 : 0));
+    };
+    // int width1 = g1_end-g1_start;
+    // int width2 = g2_end-g2_start;
+    if(gate1_focus)
+    {
+        if(shift == -1 && config.g1_start == 3) //if gate reaches starting point return
+            return;
+
+        if(shift == 1 && config.g1_end == 99)  //if gate reaches ending point return
+            return;
+
+        if (shift==-1 && config.g1_start<10){
+            int k=(config.g1_start-3)%5;
+            adjustshift(config.g1_start,3,99,ui->lineEdit_G1ST,k);
+            adjustshift(config.g1_end,3,99,ui->lineEdit_G1ED,k);
+            plotGate1(1,10);
+            return;
+        }
+
+        if(shift == 1 && config.g1_end>94){
+            int k = (99-config.g1_end)%5 ;
+            adjustshift(config.g1_start,3,99,ui->lineEdit_G1ST,k);
+            adjustshift(config.g1_end,3,99,ui->lineEdit_G1ED,k);
+            plotGate1(1,10);
+            return;
+        }
+
+        adjustshift(config.g1_start,3,99,ui->lineEdit_G1ST,5);
+        adjustshift(config.g1_end,3,99,ui->lineEdit_G1ED,5);
+        plotGate1(1,10);
+
+    }
+    else
+    {
+        if(shift == -1 && config.g2_start == 3) //if gate reaches starting point return
+            return;
+
+        if(shift == 1 && config.g2_end == 99)  //if gate reaches ending point return
+            return;
+
+        if (shift==-1 && config.g2_start<10){
+            int k =(config.g2_start-3)%5;
+            adjustshift(config.g2_start,3,99,ui->lineEdit_G2ST,k);
+            adjustshift(config.g2_end,3,99,ui->lineEdit_G2ED,k);
+            plotGate2(1,10);
+            return;
+        }
+
+        if(shift == 1 && config.g2_end>94){
+            int k =(99-config.g2_end)%5;
+            adjustshift(config.g2_start,3,99,ui->lineEdit_G2ST,k);
+            adjustshift(config.g2_end,3,99,ui->lineEdit_G2ED,k);
+            plotGate2(1,10);
+            return;
+        }
+
+        adjustshift(config.g2_start,3,99,ui->lineEdit_G2ST,5);
+        adjustshift(config.g2_end,3,99,ui->lineEdit_G2ED,5);
+        plotGate2(1,10);
+    }
+
+}
+
+void TestScreen::navigateFocusVertical(int direction)
+{
+    QList<QWidget*> navWidgets = {
+        ui->lineEdit_Gain,
+        ui->lineEdit_Range,
+        ui->lineEdit_Delay,
+        ui->lineEdit_Reject,
+        ui->lineEdit_Angle,
+        ui->comboBox_pos,
+        ui->lineEdit_G1ST,
+        ui->lineEdit_G1ED,
+        ui->lineEdit_TH1,
+        ui->lineEdit_G2ST,
+        ui->lineEdit_G2ED,
+        ui->lineEdit_TH2,
+    };
+
+    // 🔹 Trust Qt's real focus
+    QWidget *current = focusWidget();
+
+    // Fallback only if nothing focused
+   if (!current || !navWidgets.contains(current)){
+        current = ui->lineEdit_Gain;
+        setLogicalFocus(current);
+        ui->label_offset->setVisible(true);
+        ui->label_offset->setText("offset : " + QString::number(gain_offsetArr[gain_Offset_i],'f',1 ));
+        return;
+    }
+
+    setLogicalFocus(current);
+    int index = navWidgets.indexOf(current);
+
+    int newIndex = index + direction;
+    if (newIndex < 0)
+        newIndex = navWidgets.size() - 1;
+    else if (newIndex >= navWidgets.size())
+        newIndex = 0;
+
+    QWidget *newWidget = navWidgets[newIndex];
+    if(newWidget == ui->lineEdit_Angle ||
+        newWidget == ui->lineEdit_G1ST ||
+        newWidget == ui->lineEdit_G1ED ||
+        newWidget == ui->lineEdit_TH1 ||
+        newWidget == ui->lineEdit_G2ST ||
+        newWidget == ui->lineEdit_G2ED ||
+        newWidget == ui->lineEdit_TH2  ||
+        newWidget == ui->comboBox_pos
+        )
+    {
+        ui->label_offset->setVisible(false);
+    }
+    else{
+        ui->label_offset->setVisible(true);
+    }
+
+    if(newWidget == ui->lineEdit_Gain) ui->label_offset->setText("offset : "+QString::number(gain_offsetArr[gain_Offset_i],'f',0));
+    else if(newWidget == ui->lineEdit_Range) ui->label_offset->setText("offset : "+QString::number(range_offsetArr[range_Offset_i]));
+    else if(newWidget == ui->lineEdit_Delay) ui->label_offset->setText("offset : "+QString::number(delay_offsetArr[delay_Offset_i]));
+    else if(newWidget == ui->lineEdit_Reject) ui->label_offset->setText("offset : "+QString::number(reject_offsetArr[reject_Offset_i]));
+
+    setLogicalFocus(newWidget);
+
+
+    // newWidget->setFocus(Qt::OtherFocusReason);
+
+    // 🔹 Move cursor for LineEdit
+    if (auto le = qobject_cast<QLineEdit*>(newWidget))
+        le->setCursorPosition(le->text().length());
+
+    qDebug() << "Moved focus from"
+             << current->objectName()
+             << "to"
+             << newWidget->objectName();
+}
+
+
+
+void TestScreen::handleDigitInput(int digit)
+{
+    qDebug() << "handle Digit input:" << digit;
+
+    QLineEdit* focused = qobject_cast<QLineEdit*>(this->focusWidget());
+    if (!focused || !focused->isEnabled())
+        return;
+
+    if (!inputStates.contains(focused))
+        return;
+
+    KeyPressState &state = inputStates[focused];
+
+    // Reset buffer if idle for more than 3 seconds
+    if (!state.timer.isValid() || state.timer.elapsed() > 3000)
+        state.inputBuffer.clear();
+
+    // Append new digit
+    state.inputBuffer += QString::number(digit);
+
+    bool ok = false;
+    int value = state.inputBuffer.toInt(&ok);
+    if (!ok)
+        return;
+
+    // ---------- Determine limits ----------
+    int min = 0, max = 999;
+
+    if      (focused == ui->lineEdit_calset)   { min = 1;  max = 50; }
+    else if (focused == ui->lineEdit_Velocity) { min = 0;  max = 9999; }
+    else if (focused == ui->lineEdit_Gain)     { min = 0;  max = 80; }
+    else if (focused == ui->lineEdit_Range)    { min = 50;  max = 1000; }
+    else if (focused == ui->lineEdit_Delay)    { min = 0;  max = 200; }
+    else if (focused == ui->lineEdit_Reject)   { min = 0;  max = 99; }
+    else if (focused == ui->lineEdit_Angle)    { min = 0;  max = 90; }
+    else if (focused == ui->lineEdit_G1ST ||
+            focused == ui->lineEdit_G1ED ||
+            focused == ui->lineEdit_G2ST ||
+            focused == ui->lineEdit_G2ED )
+    {
+        min = 3;
+        max = 99;
+    }
+    else if (focused == ui->lineEdit_TH1  ||
+            focused == ui->lineEdit_TH2)
+    {
+        min = 5;
+        max = 99;
+    }
+
+    // ---------- Allow partial typing ----------
+    int maxDigits = QString::number(max).length();
+
+    if (state.inputBuffer.length() > maxDigits || value > max)
+    {
+        state.inputBuffer.chop(1);
+        return;
+    }
+
+    // Show exactly what user typed
+    focused->setText(state.inputBuffer);
+    state.timer.restart();
+
+    // ---------- Update entry only if valid final range ----------
+
+    if (value >max)
+        value = max;
+
+
+    if (value < min)
+        value = min;
+
+
+    if(focused == ui->lineEdit_calset)
+    {
+        config.calset   = value;
+        ui->lineEdit_calset->setText(QString::number(value, 'd', 0));
+
+    }
+    else if (focused == ui->lineEdit_Velocity)
+    {
+        config.velocity = value;
+        UserVelocity = value;
+
+        // if (value != 0)
+        //     RANGE_FACTOR = 20000.0 / value;
+    }
+    else if (focused == ui->lineEdit_Gain)     config.Gain     = value;
+    else if (focused == ui->lineEdit_Range)    config.range    = value;
+    else if (focused == ui->lineEdit_Delay)    config.delay    = value;
+    else if (focused == ui->lineEdit_Reject)   config.reject   = value;
+    else if (focused == ui->lineEdit_Angle)    config.Angle    = value;
+    else if (focused == ui->lineEdit_G1ST)     config.g1_start = value;
+    else if (focused == ui->lineEdit_G1ED)     config.g1_end   = value;
+    else if (focused == ui->lineEdit_TH1)      config.th1      = value;
+    else if (focused == ui->lineEdit_G2ST)     config.g2_start = value;
+    else if (focused == ui->lineEdit_G2ED)     config.g2_end   = value;
+    else if (focused == ui->lineEdit_TH2)      config.th2      = value;
+}
+
+void TestScreen::adjustCurrentLineEdit(int delta)
+{
+    QLineEdit* focused = qobject_cast<QLineEdit*>(this->focusWidget());
+    // if (!focused || !focused->isEnabled())
+    //     return;
+
+
+    auto adjustValue = [&](auto& field, int minVal, int maxVal,float off) {
+        using T = std::decay_t<decltype(field)>;
+        T current = static_cast<T>(focused->text().toDouble());
+        T newValue = qBound(static_cast<T>(minVal), current + static_cast<T>(delta * off), static_cast<T>(maxVal));
+        field = newValue;
+        if(focused==ui->lineEdit_Gain)
+            focused->setText(QString::number(newValue, 'f', std::is_floating_point<T>::value ? 1 : 0));
+        else
+            focused->setText(QString::number(newValue, 'd',0));
+    };
+
+    if(gate1_focus){
+        focused = ui->lineEdit_G1ED;
+        if(config.g1_start==config.g1_end && delta ==-1){
+            return;
+        }
+        if(config.g1_start<=config.g1_end){
+            adjustValue(config.g1_end, 3, 99,1);
+            plotGate1(1,10);}
+        return;
+    }
+    else if(gate2_focus){
+        focused=ui->lineEdit_G2ED;
+        if(config.g2_start==config.g2_end && delta ==-1){
+            return;
+        }
+        if(config.g2_start<=config.g2_end){
+            adjustValue(config.g2_end, 3, 99,1);
+            plotGate2(1,10);
+        }
+        return;
+    }
+
+    if (focused == ui->lineEdit_Gain)
+    {       adjustValue(config.Gain,   0, 80, gain_offsetArr[gain_Offset_i]) ;
+            onApplyGainClicked();
+    }
+    else if (focused == ui->lineEdit_Range)  {adjustValue(config.range,  50, 1000, range_offsetArr[range_Offset_i]);} // assume range is double
+    else if (focused == ui->lineEdit_Delay)  adjustValue(config.delay,  0, 200, delay_offsetArr[delay_Offset_i]); // float or int
+    else if (focused == ui->lineEdit_Reject) adjustValue(config.reject, 0, 99, reject_offsetArr[reject_Offset_i]);  // float or int
+    else if (focused == ui->lineEdit_Angle)  adjustValue(config.Angle,  0, 90,1);  // float
+    else if (focused == ui->lineEdit_G1ST)   adjustValue(config.g1_start, 3, 99,1); // int
+    else if (focused == ui->lineEdit_G1ED)   adjustValue(config.g1_end,   3, 99,1); // int
+    else if (focused == ui->lineEdit_TH1)    adjustValue(config.th1,      5, 99,1); // int
+    else if (focused == ui->lineEdit_G2ST)   adjustValue(config.g2_start, 3, 99,1); // int
+    else if (focused == ui->lineEdit_G2ED)   adjustValue(config.g2_end,   3, 99,1); // int
+    else if (focused == ui->lineEdit_TH2)    adjustValue(config.th2,      5, 99,1); // int
+
+    else if (focused == ui->lineEdit_CP)
+    {
+        if(delta==1)
+        {
+            SaveDACPar();
+            DrawDACCurve();
+        }
+        else if(delta == -1)
+        {
+            if(CP>=1 && CP<=10)
+            {
+                DACx[CP-1]=0;
+                DACy[CP-1]=0;
+                if(CP>1)CP=CP-1;
+                ui->lineEdit_CP->setText(QString::number(CP));
+                DrawDACCurve();
+            }
+        }
+    }
+
+}
+
+
+
+void TestScreen::handleBackspaceInput()
+{
+    QLineEdit* focused = qobject_cast<QLineEdit*>(this->focusWidget());
+    if (!focused || !focused->isEnabled() || !inputStates.contains(focused))
+        return;
+
+    KeyPressState &state = inputStates[focused];
+
+    if (state.inputBuffer.isEmpty())
+        return;
+
+    // Remove last digit
+    state.inputBuffer.chop(1);
+
+    if (state.inputBuffer.isEmpty())
+    {
+        focused->clear();
+        //return;
+    }
+
+    bool ok = false;
+    int value = state.inputBuffer.toInt(&ok);
+    if (!ok)
+        return;
+
+    // ---------- Limits ----------
+    int min = 0, max = 999;
+
+    if      (focused == ui->lineEdit_calset)   { min = 1;  max = 50; }
+    else if (focused == ui->lineEdit_Velocity) { min = 0;  max = 9999; }
+    else if (focused == ui->lineEdit_Gain)     { min = 0;  max = 80; }
+    else if (focused == ui->lineEdit_Range)    { min = 50; max = 1000; }  // updated
+    else if (focused == ui->lineEdit_Delay)    { min = 0;  max = 200; }
+    else if (focused == ui->lineEdit_Reject)   { min = 0;  max = 99; }
+    else if (focused == ui->lineEdit_Angle)    { min = 0;  max = 90; }
+    else if (focused == ui->lineEdit_G1ST ||
+             focused == ui->lineEdit_G1ED ||
+             focused == ui->lineEdit_G2ST ||
+             focused == ui->lineEdit_G2ED )
+
+    {
+        min = 3;
+        max = 99;
+    }
+
+    else if (focused == ui->lineEdit_TH1  ||
+             focused == ui->lineEdit_TH2)
+    {
+        min = 5;
+        max = 99;
+    }
+
+    // ---------- Allow partial delete ----------
+    if (value > max)
+    {
+        value = max;
+        // focused->clear();
+        // return;
+    }
+
+    // Show what remains
+    focused->setText(state.inputBuffer);
+    state.timer.restart();
+
+    // Only update entry if within final valid range
+    if (value < min)
+    {
+        value = min;
+    }
+
+    if      (focused == ui->lineEdit_calset)
+    {
+        config.calset   = value;
+        ui->lineEdit_calset->setText(QString::number(value, 'd', 0));
+    }
+    else if (focused == ui->lineEdit_Velocity) config.velocity = value;
+    else if (focused == ui->lineEdit_Gain)     config.Gain     = value;
+    else if (focused == ui->lineEdit_Range)    config.range    = value;
+    else if (focused == ui->lineEdit_Delay)    config.delay    = value;
+    else if (focused == ui->lineEdit_Reject)   config.reject   = value;
+    else if (focused == ui->lineEdit_Angle)    config.Angle    = value;
+    else if (focused == ui->lineEdit_G1ST)     config.g1_start = value;
+    else if (focused == ui->lineEdit_G1ED)     config.g1_end   = value;
+    else if (focused == ui->lineEdit_TH1)      config.th1      = value;
+    else if (focused == ui->lineEdit_G2ST)     config.g2_start = value;
+    else if (focused == ui->lineEdit_G2ED)     config.g2_end   = value;
+    else if (focused == ui->lineEdit_TH2)      config.th2      = value;
+
+}
+
+void TestScreen::FunctionLeftRight(bool increment)
+{
+    QLineEdit* focused = qobject_cast<QLineEdit*>(focusWidget());
+    if(qobject_cast<QComboBox*>(focusWidget()) == ui->comboBox_pos){
+        int count = ui->comboBox_pos->count();
+        int currentIndex = ui->comboBox_pos->currentIndex();
+        if(increment){
+            int newIndex = qBound(0, currentIndex + 1, count - 1);
+            ui->comboBox_pos->setCurrentIndex(newIndex);
+            const QByteArray selectedPosition = ui->comboBox_pos->currentText().trimmed().toLocal8Bit();
+            qstrncpy(config.position, selectedPosition.constData(), sizeof(config.position));
+        }else{
+            int newIndex = qBound(0, currentIndex - 1, count - 1);
+            ui->comboBox_pos->setCurrentIndex(newIndex);
+            const QByteArray selectedPosition = ui->comboBox_pos->currentText().trimmed().toLocal8Bit();
+            qstrncpy(config.position, selectedPosition.constData(), sizeof(config.position));
+        }
+    }
+    if(focused == ui->lineEdit_Gain)
+    {
+        if(increment){
+            if((gain_Offset_i+1)<gain_offsetArr.size()){
+                gain_Offset_i++;
+                ui->label_offset->setText("offset : " + QString::number(gain_offsetArr[gain_Offset_i],'f',1));
+                return;
+            }
+            else if((gain_Offset_i+1)==gain_offsetArr.size() ){
+                gain_Offset_i = 0;
+                ui->label_offset->setText("offset : " + QString::number(gain_offsetArr[gain_Offset_i],'f',1));
+                return;
+            }
+        }
+        else{
+            if((gain_Offset_i-1)>=0){
+                gain_Offset_i--;
+                ui->label_offset->setText("offset : " + QString::number(gain_offsetArr[gain_Offset_i],'f',1));
+                return;
+            }
+            else if((gain_Offset_i-1)<0)
+            {
+                gain_Offset_i = gain_offsetArr.size()-1;
+                ui->label_offset->setText("offset : " + QString::number(gain_offsetArr[gain_Offset_i],'f',1));
+                return;
+            }
+        }
+    }
+    else if(focused == ui->lineEdit_Range)
+    {
+        if(increment){
+            if((range_Offset_i+1)<range_offsetArr.size()){
+                range_Offset_i++;
+                ui->label_offset->setText("offset : " + QString::number(range_offsetArr[range_Offset_i],'d',0));
+                return;
+            }
+            else if((range_Offset_i+1)==range_offsetArr.size() ){
+                range_Offset_i = 0;
+                ui->label_offset->setText("offset : " + QString::number(range_offsetArr[range_Offset_i],'d',0));
+                return;
+            }
+        }
+        else{
+            if((range_Offset_i-1)>=0){
+                range_Offset_i--;
+                ui->label_offset->setText("offset : " + QString::number(range_offsetArr[range_Offset_i],'d',0));
+                return;
+            }
+            else if((range_Offset_i-1)<0)
+            {
+                range_Offset_i = range_offsetArr.size()-1;
+                ui->label_offset->setText("offset : " + QString::number(range_offsetArr[range_Offset_i],'d',0));
+                return;
+            }
+        }
+    }
+    else if(focused == ui->lineEdit_Delay)
+    {
+        if(increment){
+            if((delay_Offset_i+1)<delay_offsetArr.size()){
+                delay_Offset_i++;
+                ui->label_offset->setText("offset : " + QString::number(delay_offsetArr[delay_Offset_i],'d',0));
+                return;
+            }
+            else if((delay_Offset_i+1)==delay_offsetArr.size() ){
+                delay_Offset_i = 0;
+                ui->label_offset->setText("offset : " + QString::number(delay_offsetArr[delay_Offset_i],'d',0));
+                return;
+            }
+        }
+        else{
+            if((delay_Offset_i-1)>=0){
+                delay_Offset_i--;
+                ui->label_offset->setText("offset : " + QString::number(delay_offsetArr[delay_Offset_i],'d',0));
+                return;
+            }
+            else if((delay_Offset_i-1)<0)
+            {
+                delay_Offset_i = delay_offsetArr.size()-1;
+                ui->label_offset->setText("offset : " + QString::number(delay_offsetArr[delay_Offset_i],'d',0));
+                return;
+            }
+        }
+    }
+    else if(focused == ui->lineEdit_Reject)
+    {
+        if(increment){
+            if((reject_Offset_i+1)<reject_offsetArr.size()){
+                reject_Offset_i++;
+                ui->label_offset->setText("offset : " + QString::number(reject_offsetArr[reject_Offset_i],'d',0));
+                return;
+            }
+            else if((reject_Offset_i+1)==reject_offsetArr.size() ){
+                reject_Offset_i = 0;
+                ui->label_offset->setText("offset : " + QString::number(reject_offsetArr[reject_Offset_i],'d',0));
+                return;
+            }
+        }
+        else{
+            if((reject_Offset_i-1)>=0){
+                reject_Offset_i--;
+                ui->label_offset->setText("offset : " + QString::number(reject_offsetArr[reject_Offset_i],'d',0));
+                return;
+            }
+            else if((range_Offset_i-1)<0)
+            {
+                reject_Offset_i = reject_offsetArr.size()-1;
+                ui->label_offset->setText("offset : " + QString::number(reject_offsetArr[reject_Offset_i],'d',0));
+                return;
+            }
+        }
+    }
+}
+
+
+void TestScreen::setInputFieldsEnabled(bool enabled)
+{
+    ui->lineEdit_calset->setEnabled(enabled);
+    ui->lineEdit_Gain->setEnabled(enabled);
+    ui->lineEdit_Range->setEnabled(enabled);
+    ui->lineEdit_Delay->setEnabled(enabled);
+    ui->lineEdit_Reject->setEnabled(enabled);
+    ui->lineEdit_Angle->setEnabled(enabled);
+    ui->lineEdit_G1ST->setEnabled(enabled);
+    ui->lineEdit_G1ED->setEnabled(enabled);
+    ui->lineEdit_TH1->setEnabled(enabled);
+    ui->lineEdit_G2ST->setEnabled(enabled);
+    ui->lineEdit_G2ED->setEnabled(enabled);
+    ui->lineEdit_TH2->setEnabled(enabled);
+    // add any others if needed
+}
+
+
+void TestScreen::onApplyGainClicked()
+{
+    ConfigEntry updatedCfg;
+
+    double userGain = ui->lineEdit_Gain->text().toDouble();   // 🔹 CHANGE
+    int selectedCh  = ui->lineEdit_ch->text().toInt();
+    int calset      = ui->lineEdit_calset->text().toInt();
+
+    if (selectedCh != 1 && selectedCh != 2) {
+        qWarning() << "Invalid channel selected";
+        return;
+    }
+
+    int userGainVal = static_cast<int>(userGain); //  SCALE AFTER DOUBLE
+
+    int gain_ch1 = 0;
+    int gain_ch2 = 0;
+
+    ConfigEntry otherCfg;
+    ConfigEntry selectedCfg;
+
+    /* -------------------------------------------------
+     * 1. Read config for both channels
+     * ------------------------------------------------- */
+    if (getconfig(calset, 1, &selectedCfg) != 0 ||
+        getconfig(calset, 2, &otherCfg) != 0) {
+        qWarning() << "Failed to read config file";
+        return;
+    }
+
+    /* -------------------------------------------------
+     * 2. Decide gains
+     * ------------------------------------------------- */
+    if (selectedCh == 1) {
+        gain_ch1 = userGain * GAIN_FACTOR;
+        gain_ch2 = static_cast<int>(otherCfg.Gain * GAIN_FACTOR);
+    } else {
+        gain_ch2 = userGain * GAIN_FACTOR;
+        gain_ch1 = static_cast<int>(selectedCfg.Gain * GAIN_FACTOR);
+    }
+
+    qDebug() << "Applying gains -> CH1:" << gain_ch1
+             << "CH2:" << gain_ch2;
+
+    /* -------------------------------------------------
+     * 3. Apply to hardware
+     * ------------------------------------------------- */
+    OperateGainDual(gain_ch1, gain_ch2);
+
+    /* -------------------------------------------------
+     * 4. Update ONLY selected channel in Config.txt
+     * ------------------------------------------------- */
+    if (getconfig(calset, selectedCh, &updatedCfg) != 0) {
+        qWarning() << "Failed to reload selected channel config";
+        return;
+    }
+
+    updatedCfg.Gain = static_cast<float>(userGain);  // 🔹 keep stored value scaled
+
+}
+
+void TestScreen::loadSavedConfig()
+{
+    // QFile file("/run/media/mmcblk1p1/config_saved.json");
+    QFile file("config_saved.json");
+
+    if (!file.exists() || !file.open(QIODevice::ReadOnly)) return;
+
+    QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    QJsonObject config = doc.object();
+
+    if((config["channel"].toInt() != 0) && (config["calset"].toInt() != 0) && (config["velocity"].toDouble() != 0))
+    {
+        Postlog.channel = config["channel"].toInt();
+        Postlog.calset  = config["calset"].toInt();
+        Postlog.velocity = config["velocity"].toDouble();
+    }
+
+    else
+    {
+        Postlog.channel = 2;
+        Postlog.calset  = 1;
+        Postlog.velocity = 3230;
+
+    }
+
+    // Update any internal fields or UI if necessary
+    ui->lineEdit_ch->setText(QString::number(Postlog.channel));
+    ui->lineEdit_calset->setText(QString::number(Postlog.calset));
+    ui->lineEdit_Velocity ->setText(QString::number(Postlog.velocity));
+}
+
+void TestScreen::saveConfigToFile()
+{
+    QJsonObject qconfig;
+    qconfig["channel"] = config.channel;
+    qconfig["calset"]  = config.calset;
+    qconfig["velocity"] = UserVelocity;
+
+    QFile file(QCoreApplication::applicationDirPath() + "/config_saved.json");
+    qDebug() << "Saving to:" << QCoreApplication::applicationDirPath() + "/config_saved.json";
+
+    if (file.open(QIODevice::WriteOnly)) {
+        file.write(QJsonDocument(qconfig).toJson());
+        file.close();
+    }
+}
+
+void TestScreen::setupValidators()
+{
+    ui->lineEdit_calset->setValidator(new QIntValidator(1, 50, this));
+    ui->lineEdit_Gain->setValidator(new QIntValidator(0, 80, this));
+    ui->lineEdit_Range->setValidator(new QIntValidator(50, 1000, this));
+    ui->lineEdit_Delay->setValidator(new QIntValidator(0, 200, this));
+    ui->lineEdit_Reject->setValidator(new QIntValidator(0, 99, this));
+    ui->lineEdit_Angle->setValidator(new QIntValidator(0, 90, this));
+    ui->lineEdit_G1ST->setValidator(new QIntValidator(3, 99, this));
+    ui->lineEdit_G1ED->setValidator(new QIntValidator(3, 99, this));
+    ui->lineEdit_TH1->setValidator(new QIntValidator(5, 99, this));
+    ui->lineEdit_G2ST->setValidator(new QIntValidator(3, 99, this));
+    ui->lineEdit_G2ED->setValidator(new QIntValidator(3, 99, this));
+    ui->lineEdit_TH2->setValidator(new QIntValidator(5, 99, this));
+}
+
+
+void TestScreen::BatteryIndication()
+{
+    float Update_value = Battery();
+
+    if (Update_value < 0) Update_value = 0;
+    if (Update_value > 100) Update_value = 100;
+
+    int roundedPercent = (int)std::round(Update_value);
+
+    updateBatteryLevel(roundedPercent);
+
+    // // Update progress bar
+    // ui->progressBar->setValue(roundedPercent);
+
+}
+
+
+
+void TestScreen::updateBatteryLevel(int percent)
+{
+
+    // Only update if value changed
+    if (percent == lastBatteryPercent)
+        return;
+
+    lastBatteryPercent = percent;
+
+    // Load the SVG outline
+    QSvgRenderer renderer(QString(":/images/battery_outline.svg"));
+
+    // Create a pixmap same size as the QLabel
+    QPixmap pix(ui->label_battery->size());
+    pix.fill(Qt::transparent);
+
+    QPainter p(&pix);
+    p.setRenderHint(QPainter::Antialiasing);
+
+    // Margin to keep fill inside the SVG outline (adjust if needed)
+   /* int margin = 3;
+    int nobeWidth = 6; */
+    int margin = 5;
+    int nobeWidth = 9; // adjust to match your SVG’s nobe
+    int maxFill = (pix.width() - nobeWidth) - 2 * margin;
+
+    // Calculate maximum fill width safely inside margins
+    //int maxFill = (pix.width()- 4) - 2 * margin;
+    int fillWidth = qBound(0, (maxFill * percent) / 100, maxFill);
+
+    QRect fillRect(margin, margin, fillWidth, pix.height() - 2 * margin);
+
+    // Pick fill color dynamically
+    QColor fillColor;
+    if (percent < 20)
+        fillColor = Qt::red;
+    else if (percent < 40)
+        fillColor = Qt::blue;
+    else
+        fillColor = Qt::green;
+
+    // Draw battery fill (under the outline)
+    p.fillRect(fillRect, fillColor);
+
+    // Draw the SVG outline scaled to QLabel size
+    renderer.render(&p, pix.rect());
+
+    // Draw numeric percentage in the center
+    p.setPen(Qt::black);
+    p.setFont(QFont("Arial", 8, QFont::Bold));
+    QString text = QString::number(percent) + "%";
+    p.drawText(pix.rect(), Qt::AlignCenter, text);
+
+    p.end();
+
+    // Set result into the QLabel
+    ui->label_battery->setPixmap(pix);
+}
+
+void TestScreen::paintAudioIndicator(QPainter &p)
+{
+    QWidget* w = ui->label_audioIndicator;
+    int hgt = w->height();  // e.g. 41
+
+    p.setRenderHint(QPainter::Antialiasing);
+
+    // --- Step 1: Draw the audio icon ---
+   // QPixmap icon(":/images/audio.jpeg");
+     QPixmap icon(":/images/After(1).jpg");
+    QSize iconSize = icon.size();
+
+    QRect iconRect(0, (hgt - iconSize.height()) / 2,
+                   iconSize.width(), iconSize.height());
+    p.drawPixmap(iconRect.topLeft(), icon);
+
+    // --- Step 2: Calculate arc count ---
+    int arcCount = 0;
+    // if (m_audioPercent >= 20) arcCount = 1;
+    // if (m_audioPercent >= 40) arcCount = 2;
+    // if (m_audioPercent >= 60) arcCount = 3;
+    // if (m_audioPercent >= 80) arcCount = 4;
+    // if (m_audioPercent >= 100) arcCount = 5;
+
+    if (m_audioPercent >= 25) arcCount = 1;
+    if (m_audioPercent >= 50) arcCount = 2;
+    if (m_audioPercent >= 75) arcCount = 3;
+    if (m_audioPercent >= 100) arcCount = 4;
+
+    QPoint center(iconRect.right() + 3, hgt / 2);  // center for arcs
+    // QPen pen(Qt::darkBlue, 2);
+    QPen pen(Qt::black, 2);
+    p.setPen(pen);
+
+    int baseRadius = iconRect.height()/4;
+    int gap = 4;
+
+    if (arcCount > 0)
+    {
+        // --- Draw arcs ---
+        for (int i = 0; i < arcCount; i++)
+        {
+            int radius = baseRadius + i * gap;
+
+            QRect arcRect(center.x() - radius, center.y() - radius,
+                          radius * 2, radius * 2);
+
+            int startAngle = 45 * 16;
+            int spanAngle  = -90 * 16;
+            p.drawArc(arcRect, startAngle, spanAngle);
+        }
+    }
+    else
+    {
+        QPen crossPen(Qt::red, 2, Qt::SolidLine, Qt::RoundCap);
+        p.setPen(crossPen);
+
+        int radius = iconRect.height() / 3;  // size of the X
+        QRect crossRect(center.x() - radius, center.y() - radius,
+                        radius * 2, radius * 2);
+
+        // Draw X inside crossRect
+        p.drawLine(crossRect.topLeft(), crossRect.bottomRight());
+        p.drawLine(crossRect.bottomLeft(), crossRect.topRight());
+    }
+}
+
+
+
+bool TestScreen::eventFilter(QObject *obj, QEvent *event)
+{
+    if (obj == ui->label_audioIndicator && event->type() == QEvent::Paint)
+    {
+        QPainter p(ui->label_audioIndicator);
+        paintAudioIndicator(p);
+        return true;
+    }
+    return QWidget::eventFilter(obj, event);
+}
+
+
+
+void TestScreen::CloseDAC()
+{
+    ui->label_DAC->setVisible(false);
+    CP=1;
+}
+
+
+
+void TestScreen::SaveDACPar()
+{
+    // Acceptable CP values are 1..10 (inclusive). Convert to zero-based index safely.
+    const int minCP = 1;
+    const int maxCP = 10;
+    if (CP >= minCP && CP <= maxCP) {
+        int idx = CP - 1;  // 0..9
+        if (idx >= 0 && idx < DACx.size() && idx < DACy.size()) {
+            DACx[idx] = peakIndex1;
+            DACy[idx] = ph1Value;
+            // If you want to auto-increment CP for the next save, do it here,
+            // but be careful not to overflow:
+            if (CP < maxCP) ++CP;
+        } else {
+            qWarning() << "SaveDACPar: index out of range" << idx;
+        }
+    } else {
+        qWarning() << "SaveDACPar: CP out of allowed range:" << CP;
+    }
+    ui->lineEdit_CP->setText(QString::number(CP));
+}
+
+
+
+void TestScreen::UserDACPoints()
+{
+    int tmp_CP = ui->lineEdit_CP->text().toInt();
+    if (tmp_CP < 1 )
+    {
+        CP=1;
+        ui->lineEdit_CP->setText(QString::number(CP));
+    }
+    if (tmp_CP > 10 )
+    {
+        CP=10;
+        ui->lineEdit_CP->setText(QString::number(CP));
+    }
+}
+
+
+void TestScreen::DrawDACCurve()
+{
+    // ui->Plot->addGraph();
+    // ui->Plot->graph(3)->setData(DACx,DACy);
+    // ui->Plot->graph(3)->setLineStyle(QCPGraph::lsLine);
+    // ui->Plot->graph(3)->setPen(QPen(Qt::yellow, 2));
+
+        // Ensure DAC arrays exist and have the correct size.
+        // Example assumes they are QVector<double> DACx, DACy and size is dacArraySize (10).
+        const int dacArraySize = 10;
+        if (DACx.size() != dacArraySize || DACy.size() != dacArraySize)
+        {
+            qWarning() << "DrawDACCurve: DAC arrays have wrong size:" << DACx.size() << DACy.size();
+            return;
+        }
+
+        QVector<double> xFiltered;
+        QVector<double> yFiltered;
+
+        for (int i = 0; i < DACx.size(); ++i) {
+            if (DACy[i] != 0 ) {
+                xFiltered.append(DACx[i]);
+                yFiltered.append(DACy[i]);
+            }
+        }
+
+        DACline->data()->clear();
+        DACline->setData(xFiltered, yFiltered);
+        DACline->setLineStyle(QCPGraph::lsLine);
+        DACline->setPen(QPen(Qt::darkGreen, 2));
+
+        ui->Plot->replot();
+}
+void TestScreen::display_mc_no(void){
+    // QFile file("BIN.BIN");
+
+    // if (!file.open(QIODevice::ReadOnly))
+    // {
+    //     qDebug() << "Failed to open BIN.BIN";
+    //     return;
+    // }
+
+    // // BIN.BIN contains 2 bytes: 0x90 0x00
+    // QByteArray data = file.readAll();
+    // file.close();
+
+    // if (data.size() < 2)
+    // {
+    //     qDebug() << "Invalid file";
+    //     return;
+    // }
+
+    // // Little-endian 16-bit integer
+    // quint16 value = static_cast<quint8>(data[0]) |
+    //                 (static_cast<quint8>(data[1]) << 8);
+
+    // // Print as 4-digit number: 0144
+    // MachNo= QString("%1").arg(value, 4, 10, QChar('0'));
+    ui->label_Machine_Val->setText( MachNo);
+    qDebug() << "Mach No : "<<MachNo;
+}
+
+
+void TestScreen::showBlankScreen()
+{
+    QWidget *blank = new QWidget();
+    blank->setStyleSheet("background-color: pink;"); // or white
+    blank->showFullScreen(); // full screen blank window
+}
+
+void TestScreen::handleRecording()
+{
+    QString baseDir = "LogData";
+
+    QDir dir;
+
+    if (!dir.exists(baseDir))
+    {
+        dir.mkpath(baseDir);
+        qDebug() << "LogData directory created";
+    }
+
+    QString dateFolder;
+
+    if(Line!="Others"){
+    dateFolder =
+        QString("%1/%2%3")
+            .arg(baseDir)
+            .arg(QDate::currentDate().toString("dd-MM-yyyy"))
+            .arg(Line);
+    }else{
+        dateFolder =
+            QString("%1/%2%3")
+                .arg(baseDir)
+                .arg(QDate::currentDate().toString("dd-MM-yyyy"))
+                .arg(LineOthers);
+    }
+
+    if (!dir.exists(dateFolder))
+        dir.mkpath(dateFolder);
+
+    QString weldFolder =
+        QString("%1/KM%2_M%3_%4_%5")
+            .arg(dateFolder)
+            .arg(km)
+            .arg(M)
+            .arg(Rail)
+            .arg(WeldNo);
+
+    if (!dir.exists(weldFolder))
+        dir.mkpath(weldFolder);
+
+
+    // -------------------------------------------------
+    // Find the calibration used for this recording
+    // -------------------------------------------------
+
+    QString calibrationDate =
+        getRecentCalibrationDate(config.channel,
+                                 config.calset);
+
+    if (calibrationDate.isEmpty())
+    {
+        qWarning() << "No recent calibration found."
+                   << "Channel:" << config.channel
+                   << "Calset:" << config.calset;
+
+        return;
+    }
+
+    qDebug() << "Calibration used for recording:"
+             << calibrationDate;
+
+
+    // -------------------------------------------------
+    // Copy calibration folder into recording folder
+    // -------------------------------------------------
+
+    QString calibrationSource =
+        QString("SavedData/%1Calib")
+            .arg(calibrationDate);
+
+    QString calibFolder =  QString("%1/Calibinfo")
+                              .arg(weldFolder);
+    if (!dir.exists(calibFolder))
+    {
+        dir.mkpath(calibFolder);
+    }
+
+    QString calibrationDestination =
+        QString("%1/%2Calib")
+            .arg(calibFolder)
+            .arg(calibrationDate);
+
+    QDir sourceDir(calibrationSource);
+
+    if (!sourceDir.exists())
+    {
+        qWarning() << "Calibration folder does not exist:"
+                   << calibrationSource;
+    }
+    else
+    {
+        // Create destination calibration folder
+        if (!dir.mkpath(calibrationDestination))
+        {
+            qWarning() << "Failed to create calibration destination:"
+                       << calibrationDestination;
+        }
+        else
+        {
+            // Copy all files from calibration folder
+            QStringList files =
+                sourceDir.entryList(QDir::Files);
+
+            for (const QString &fileName : files)
+            {
+                QString sourceFile =
+                    sourceDir.filePath(fileName);
+
+                QString destinationFile =
+                    QDir(calibrationDestination)
+                        .filePath(fileName);
+
+                if (QFile::exists(destinationFile))
+                    QFile::remove(destinationFile);
+
+                if (!QFile::copy(sourceFile, destinationFile))
+                {
+                    qWarning()
+                    << "Failed to copy calibration file:"
+                    << sourceFile;
+                }
+                else
+                {
+                    qDebug()
+                    << "Copied calibration file:"
+                    << destinationFile;
+                }
+            }
+
+            qDebug() << "Calibration folder copied:"
+                     << calibrationDestination;
+        }
+    }
+
+
+    // -------------------------------------------------
+    // Existing testdetails copy
+    // -------------------------------------------------
+
+    QString testdetailsFile =
+        QString("%1/testdetails.json").arg(weldFolder);
+
+    if (QFile::exists(testdetailsFile))
+        QFile::remove(testdetailsFile);
+
+    if (QFile::copy("testdetails.json", testdetailsFile))
+    {
+        qDebug() << "testdetails.json copied successfully";
+    }
+    else
+    {
+        qDebug() << "Failed to copy testdetails.json";
+    }
+
+
+    // -------------------------------------------------
+    // Create WT file
+    // -------------------------------------------------
+
+    int temp = 1;
+
+    QString logdataFile =
+        QString("%1/%2_Ch%3_%4.wt")
+            .arg(weldFolder)
+            .arg(config.calset)
+            .arg(config.channel)
+            .arg(config.Angle);
+
+    while (QFile::exists(logdataFile))
+    {
+        logdataFile =
+            QString("%1/%2_Ch%3_%4(%5).wt")
+                .arg(weldFolder)
+                .arg(config.calset)
+                .arg(config.channel)
+                .arg(config.Angle)
+                .arg(temp);
+
+        temp++;
+    }
+
+    QFile file(logdataFile);
+
+    if (file.open(QIODevice::WriteOnly))
+    {
+        qDebug() << "WT file created:" << logdataFile;
+        file.close();
+    }
+
+    logfile.open(logdataFile,
+                 config,
+                 MachNo,
+                 calibrationDate);
+}
+bool TestScreen::saveCalibrationHistory()
+{
+    QString baseFolder = "SavedData";
+    //QString filePath = folderPath + "/calibration_history.json";
+    QString folderPath = QString("%1/%2%3").arg(baseFolder).arg(QDate::currentDate().toString("dd-MM-yyyy")).arg("Calib");
+
+    // Create folder if it doesn't exist
+    QDir dir;
+
+    if (!dir.mkpath(folderPath))
+    {
+        qWarning() << "Failed to create folder:"
+                   << folderPath;
+        return false;
+    }
+
+    QString filePath = QString("%1/calibration_history.json").arg(folderPath);
+    QString jpgfilePath = QString("%1/calibration_history.jpg").arg(folderPath);
+
+    QJsonArray calibrations;
+
+    // -------------------------------------------------
+    // Read existing JSON file
+    // -------------------------------------------------
+
+    QFile file(filePath);
+
+    if (file.exists())
+    {
+        if (file.open(QIODevice::ReadOnly))
+        {
+            QByteArray data = file.readAll();
+            file.close();
+
+            QJsonParseError parseError;
+            QJsonDocument doc =
+                QJsonDocument::fromJson(data, &parseError);
+
+            if (parseError.error == QJsonParseError::NoError &&
+                doc.isObject())
+            {
+                QJsonObject root = doc.object();
+
+                if (root.contains("calibrations") &&
+                    root["calibrations"].isArray())
+                {
+                    calibrations =
+                        root["calibrations"].toArray();
+                }
+            }
+            else
+            {
+                qWarning() << "Invalid calibration JSON:"
+                           << parseError.errorString();
+            }
+        }
+        else
+        {
+            qWarning() << "Could not open:"
+                       << filePath;
+        }
+    }
+
+    // -------------------------------------------------
+    // Get current date/time
+    // -------------------------------------------------
+
+    QDateTime now = QDateTime::currentDateTime();
+
+    QString date = now.date().toString("dd-MM-yyyy");
+    QString time = now.time().toString("HH:mm:ss");
+
+    // -------------------------------------------------
+    // Current calibration
+    //
+    // Replace these with your actual variables
+    // -------------------------------------------------
+
+    int currentChannel = config.channel;
+    int currentCalset  = config.calset;
+
+    // -------------------------------------------------
+    // Create new calibration object
+    // -------------------------------------------------
+
+    QJsonObject calibration;
+
+    calibration["channel"] = currentChannel;
+    calibration["calset"]  = currentCalset;
+
+    calibration["gain"]   = config.Gain;
+    calibration["range"]  = config.range;
+    calibration["reject"] = config.reject;
+    calibration["delay"]  = config.delay;
+    calibration["angle"]  = config.Angle;
+
+    calibration["g1st"] = config.g1_start;
+    calibration["g1ed"] = config.g1_end;
+    calibration["th1"]  = config.th1;
+
+    calibration["g2st"] = config.g2_start;
+    calibration["g2ed"] = config.g2_end;
+    calibration["th2"]  = config.th2;
+
+    calibration["date"] = date;
+    calibration["time"] = time;
+
+    // -------------------------------------------------
+    // Search for existing Channel + Calset
+    // -------------------------------------------------
+
+    bool found = false;
+
+    for (int i = 0; i < calibrations.size(); ++i)
+    {
+        QJsonObject existing =
+            calibrations[i].toObject();
+
+        int existingChannel =
+            existing["channel"].toInt();
+
+        int existingCalset =
+            existing["calset"].toInt();
+
+        if (existingChannel == currentChannel &&
+            existingCalset == currentCalset)
+        {
+            // Existing record found
+            // Replace it with latest calibration
+            calibrations[i] = calibration;
+
+            found = true;
+
+            qDebug() << "Updated calibration:"
+                     << "Channel =" << currentChannel
+                     << "Calset =" << currentCalset;
+
+            break;
+        }
+    }
+
+    // -------------------------------------------------
+    // If not found, add new record
+    // -------------------------------------------------
+
+    if (!found)
+    {
+        calibrations.append(calibration);
+
+        qDebug() << "Added new calibration:"
+                 << "Channel =" << currentChannel
+                 << "Calset =" << currentCalset;
+    }
+
+    // -------------------------------------------------
+    // Create root JSON object
+    // -------------------------------------------------
+
+    QJsonObject root;
+
+    root["calibrations"] = calibrations;
+
+    // -------------------------------------------------
+    // Write JSON file
+    // -------------------------------------------------
+
+    if (!file.open(QIODevice::WriteOnly |
+                   QIODevice::Truncate))
+    {
+        qWarning() << "Failed to write:"
+                   << filePath;
+
+        return false;
+    }
+
+    QJsonDocument output(root);
+
+    file.write(output.toJson(QJsonDocument::Indented));
+
+    file.close();
+
+    qDebug() << "Calibration history saved:"
+             << filePath;
+
+    generateCalibrationHistoryJpg(filePath,jpgfilePath);
+    return true;
+
+}
+bool TestScreen::generateCalibrationHistoryJpg(const QString &jsonPath,
+                                               const QString &jpgPath)
+{
+    // -------------------------------------------------
+    // Read JSON file
+    // -------------------------------------------------
+
+    QFile jsonFile(jsonPath);
+
+    if (!jsonFile.open(QIODevice::ReadOnly))
+    {
+        qWarning() << "Could not open JSON file:"
+                   << jsonPath;
+        return false;
+    }
+
+    QByteArray data = jsonFile.readAll();
+    jsonFile.close();
+
+    QJsonParseError parseError;
+
+    QJsonDocument doc =
+        QJsonDocument::fromJson(data, &parseError);
+
+    if (parseError.error != QJsonParseError::NoError)
+    {
+        qWarning() << "JSON parse error:"
+                   << parseError.errorString();
+        return false;
+    }
+
+    if (!doc.isObject())
+    {
+        qWarning() << "JSON root is not an object";
+        return false;
+    }
+
+    QJsonObject root = doc.object();
+
+    if (!root.contains("calibrations") ||
+        !root["calibrations"].isArray())
+    {
+        qWarning() << "No calibrations array found";
+        return false;
+    }
+
+    QJsonArray calibrations =
+        root["calibrations"].toArray();
+
+    // -------------------------------------------------
+    // Separate Channel 1 and Channel 2
+    // -------------------------------------------------
+
+    QList<QJsonObject> channel1Records;
+    QList<QJsonObject> channel2Records;
+
+    for (const QJsonValue &value : calibrations)
+    {
+        if (!value.isObject())
+            continue;
+
+        QJsonObject calibration =
+            value.toObject();
+
+        int channel =
+            calibration["channel"].toInt();
+
+        if (channel == 1)
+        {
+            channel1Records.append(calibration);
+        }
+        else if (channel == 2)
+        {
+            channel2Records.append(calibration);
+        }
+    }
+
+    // -------------------------------------------------
+    // Get date from JSON
+    //
+    // Since the JPG is generated from JSON only,
+    // take the date from the first available record.
+    // -------------------------------------------------
+
+    QString calibrationDate;
+
+    if (!calibrations.isEmpty())
+    {
+        QJsonObject firstRecord =
+            calibrations[0].toObject();
+
+        calibrationDate =
+            firstRecord["date"].toString();
+    }
+
+    // -------------------------------------------------
+    // Create 640 x 480 image
+    // -------------------------------------------------
+
+    const int width = 640;
+    const int height = 480;
+
+    QImage image(
+        width,
+        height,
+        QImage::Format_RGB32
+        );
+
+    image.fill(Qt::white);
+
+    QPainter painter(&image);
+
+    painter.setRenderHint(
+        QPainter::Antialiasing,
+        false
+        );
+
+    painter.setPen(Qt::black);
+
+    // -------------------------------------------------
+    // Main title
+    // -------------------------------------------------
+
+    QFont titleFont(
+        "Arial",
+        14,
+        QFont::Bold
+        );
+
+    painter.setFont(titleFont);
+
+    painter.drawText(
+        QRect(0, 3, width, 22),
+        Qt::AlignCenter,
+        "CALIBRATION HISTORY"
+        );
+
+    // -------------------------------------------------
+    // Date
+    // -------------------------------------------------
+
+    QFont dateFont(
+        "Arial",
+        9,
+        QFont::Bold
+        );
+
+    painter.setFont(dateFont);
+
+    painter.drawText(
+        QRect(0, 25, width, 16),
+        Qt::AlignCenter,
+        QString("DATE: %1")
+            .arg(calibrationDate)
+        );
+
+    // -------------------------------------------------
+    // Layout
+    // -------------------------------------------------
+
+    const int margin = 3;
+
+    const int tableY = 45;
+
+    const int sectionWidth =
+        (width - (margin * 3)) / 2;
+
+    const int leftX =
+        margin;
+
+    const int rightX =
+        margin * 2 + sectionWidth;
+
+    // -------------------------------------------------
+    // Channel headings
+    // -------------------------------------------------
+
+    const int channelHeaderHeight = 18;
+
+    QFont channelFont(
+        "Arial",
+        9,
+        QFont::Bold
+        );
+
+    painter.setFont(channelFont);
+
+    painter.drawText(
+        QRect(
+            leftX,
+            tableY,
+            sectionWidth,
+            channelHeaderHeight
+            ),
+        Qt::AlignCenter,
+        "CHANNEL 1"
+        );
+
+    painter.drawText(
+        QRect(
+            rightX,
+            tableY,
+            sectionWidth,
+            channelHeaderHeight
+            ),
+        Qt::AlignCenter,
+        "CHANNEL 2"
+        );
+
+    // -------------------------------------------------
+    // Table configuration
+    // -------------------------------------------------
+
+    const int actualTableY =
+        tableY + channelHeaderHeight;
+
+    const int headerHeight = 22;
+
+    // Increased row height
+    const int rowHeight = 15;
+
+    /*
+        Columns:
+
+        CAL
+        GAIN
+        RNG/RJ
+        DLY/ANG
+        G1
+        G2
+        TIME
+    */
+
+    const int columnCount = 7;
+
+    QString headers[columnCount] =
+        {
+            "CAL",
+            "GAIN",
+            "RNG/RJ",
+            "DLY/ANG",
+            "G1",
+            "G2",
+            "TIME"
+        };
+
+    // -------------------------------------------------
+    // Column width weights
+    //
+    // Total weight = 100
+    // -------------------------------------------------
+
+    int columnWeight[columnCount] =
+        {
+            8,   // CAL
+            12,  // GAIN
+            14,  // RNG/RJ
+            14,  // DLY/ANG
+            16,  // G1
+            16,  // G2
+            20   // TIME
+        };
+
+    int totalWeight = 0;
+
+    for (int i = 0; i < columnCount; ++i)
+    {
+        totalWeight += columnWeight[i];
+    }
+
+    // -------------------------------------------------
+    // Draw one channel table
+    // -------------------------------------------------
+
+    auto drawChannelTable =
+        [&](int startX,
+            const QList<QJsonObject> &records)
+    {
+        int columnWidth[columnCount];
+
+        for (int i = 0; i < columnCount; ++i)
+        {
+            columnWidth[i] =
+                (sectionWidth * columnWeight[i])
+                / totalWeight;
+        }
+
+        // ---------------------------------------------
+        // Table header
+        // ---------------------------------------------
+
+        QFont headerFont(
+            "Arial",
+            7,
+            QFont::Bold
+            );
+
+        painter.setFont(headerFont);
+
+        int x = startX;
+
+        for (int col = 0;
+             col < columnCount;
+             ++col)
+        {
+            QRect cell(
+                x,
+                actualTableY,
+                columnWidth[col],
+                headerHeight
+                );
+
+            painter.setPen(
+                QPen(Qt::black, 1)
+                );
+
+            painter.drawRect(cell);
+
+            painter.drawText(
+                cell,
+                Qt::AlignCenter,
+                headers[col]
+                );
+
+            x += columnWidth[col];
+        }
+
+        // ---------------------------------------------
+        // Data font
+        // ---------------------------------------------
+
+        QFont dataFont(
+            "Arial",
+            7,
+            QFont::Normal
+            );
+
+        painter.setFont(dataFont);
+
+        // Maximum 50 records per channel
+        const int maxRows = 50;
+
+        int rowsToDraw =
+            qMin(records.size(), maxRows);
+
+        // ---------------------------------------------
+        // Draw records
+        // ---------------------------------------------
+
+        for (int row = 0;
+             row < rowsToDraw;
+             ++row)
+        {
+            const QJsonObject &calibration =
+                records[row];
+
+            QString calset =
+                QString::number(
+                    calibration["calset"].toInt()
+                    );
+
+            QString gain =
+                QString::number(
+                    calibration["gain"].toDouble()
+                    );
+
+            QString range =
+                QString::number(
+                    calibration["range"].toDouble()
+                    );
+
+            QString reject =
+                QString::number(
+                    calibration["reject"].toDouble()
+                    );
+
+            QString delay =
+                QString::number(
+                    calibration["delay"].toDouble()
+                    );
+
+            QString angle =
+                QString::number(
+                    calibration["angle"].toDouble()
+                    );
+
+            QString g1st =
+                QString::number(
+                    calibration["g1st"].toDouble()
+                    );
+
+            QString g1ed =
+                QString::number(
+                    calibration["g1ed"].toDouble()
+                    );
+
+            QString th1 =
+                QString::number(
+                    calibration["th1"].toDouble()
+                    );
+
+            QString g2st =
+                QString::number(
+                    calibration["g2st"].toDouble()
+                    );
+
+            QString g2ed =
+                QString::number(
+                    calibration["g2ed"].toDouble()
+                    );
+
+            QString th2 =
+                QString::number(
+                    calibration["th2"].toDouble()
+                    );
+
+            QString time =
+                calibration["time"].toString();
+
+            // -----------------------------------------
+            // Combine fields
+            // -----------------------------------------
+
+            QString rangeReject =
+                range + "/" + reject;
+
+            QString delayAngle =
+                delay + "/" + angle;
+
+            QString gate1 =
+                g1st + "-" +
+                g1ed + "/" +
+                th1;
+
+            QString gate2 =
+                g2st + "-" +
+                g2ed + "/" +
+                th2;
+
+            QString values[columnCount] =
+                {
+                    calset,
+                    gain,
+                    rangeReject,
+                    delayAngle,
+                    gate1,
+                    gate2,
+                    time
+                };
+
+            int y =
+                actualTableY +
+                headerHeight +
+                row * rowHeight;
+
+            x = startX;
+
+            for (int col = 0;
+                 col < columnCount;
+                 ++col)
+            {
+                QRect cell(
+                    x,
+                    y,
+                    columnWidth[col],
+                    rowHeight
+                    );
+
+                painter.setPen(
+                    QPen(Qt::black, 1)
+                    );
+
+                painter.drawRect(cell);
+
+                painter.drawText(
+                    cell,
+                    Qt::AlignCenter,
+                    values[col]
+                    );
+
+                x += columnWidth[col];
+            }
+        }
+    };
+
+    // -------------------------------------------------
+    // Draw Channel 1
+    // -------------------------------------------------
+
+    drawChannelTable(
+        leftX,
+        channel1Records
+        );
+
+    // -------------------------------------------------
+    // Draw Channel 2
+    // -------------------------------------------------
+
+    drawChannelTable(
+        rightX,
+        channel2Records
+        );
+
+    // -------------------------------------------------
+    // Footer
+    // -------------------------------------------------
+
+    int totalRecords =
+        channel1Records.size() +
+        channel2Records.size();
+
+    QFont footerFont(
+        "Arial",
+        8,
+        QFont::Bold
+        );
+
+    painter.setFont(footerFont);
+
+    painter.drawText(
+        QRect(
+            5,
+            465,
+            630,
+            12
+            ),
+        Qt::AlignCenter,
+        QString("Total calibration records: %1")
+            .arg(totalRecords)
+        );
+
+    painter.end();
+
+    // -------------------------------------------------
+    // Save JPG
+    // -------------------------------------------------
+
+    if (!image.save(
+            jpgPath,
+            "JPG",
+            95))
+    {
+        qWarning()
+        << "Failed to save JPG:"
+        << jpgPath;
+
+        return false;
+    }
+
+    qDebug()
+        << "Calibration JPG created:"
+        << jpgPath;
+
+    qDebug()
+        << "Channel 1 records:"
+        << channel1Records.size();
+
+    qDebug()
+        << "Channel 2 records:"
+        << channel2Records.size();
+
+    qDebug()
+        << "Total records:"
+        << totalRecords;
+
+    return true;
+}
+
+bool TestScreen::isCalibrationRecent(int channel, int calset)
+{
+    return !getRecentCalibrationDate(channel, calset).isEmpty();
+}
+QString TestScreen::getRecentCalibrationDate(int channel, int calset)
+{
+    QString baseFolder = "SavedData";
+    QDate today = QDate::currentDate();
+
+    // Check today + previous 3 days
+    for (int daysAgo = 0; daysAgo <= 3; ++daysAgo)
+    {
+        QDate checkDate = today.addDays(-daysAgo);
+
+        QString dateString = checkDate.toString("dd-MM-yyyy");
+
+        QString folderName = dateString + "Calib";
+
+        QString filePath =
+            QString("%1/%2/calibration_history.json")
+                .arg(baseFolder)
+                .arg(folderName);
+
+        QFile file(filePath);
+
+        if (!file.exists())
+            continue;
+
+        if (!file.open(QIODevice::ReadOnly))
+        {
+            qWarning() << "Could not open calibration history:"
+                       << filePath;
+            continue;
+        }
+
+        QByteArray data = file.readAll();
+        file.close();
+
+        QJsonParseError parseError;
+
+        QJsonDocument doc =
+            QJsonDocument::fromJson(data, &parseError);
+
+        if (parseError.error != QJsonParseError::NoError)
+        {
+            qWarning() << "Invalid calibration JSON:"
+                       << filePath
+                       << parseError.errorString();
+            continue;
+        }
+
+        if (!doc.isObject())
+            continue;
+
+        QJsonObject root = doc.object();
+
+        if (!root.contains("calibrations") ||
+            !root["calibrations"].isArray())
+        {
+            continue;
+        }
+
+        QJsonArray calibrations =
+            root["calibrations"].toArray();
+
+        for (const QJsonValue &value : calibrations)
+        {
+            if (!value.isObject())
+                continue;
+
+            QJsonObject calibration =
+                value.toObject();
+
+            int existingChannel =
+                calibration["channel"].toInt();
+
+            int existingCalset =
+                calibration["calset"].toInt();
+
+            if (existingChannel == channel &&
+                existingCalset == calset)
+            {
+                qDebug() << "Recent calibration found:"
+                         << "Channel =" << channel
+                         << "Calset =" << calset
+                         << "Date =" << dateString;
+
+                return dateString;
+            }
+        }
+    }
+
+    qDebug() << "No recent calibration found:"
+             << "Channel =" << channel
+             << "Calset =" << calset;
+
+    return QString();
+}
+bool TestScreen::isRecording() const
+{
+    return ui->label_record->isVisible();
+}
+void TestScreen::applyTestScreenTheme()
+{
+    const bool light =
+        settings::theme().compare("Light", Qt::CaseInsensitive) == 0;
+
+    if (light)
+    {
+        this->setStyleSheet(R"(
+            QWidget {
+                background-color: #F2F5F8;
+                color: #1B2430;
+                font-family: "Segoe UI";
+                font-size: 11px;
+            }
+
+            QFrame#Header_2,
+            QFrame#formFrame,
+            QFrame#verticalFrame,
+            QFrame#horizontalFrame {
+                background-color: #FFFFFF;
+                border: 1px solid #C5CED8;
+                border-radius: 12px;
+            }
+
+            QLabel {
+                color: #1B2430;
+                background: transparent;
+            }
+
+            QLineEdit {
+                background-color: #FFFFFF;
+                border: 1px solid #AAB6C3;
+                border-radius: 8px;
+                color: #1B2430;
+                min-height: 28px;
+                padding-left: 8px;
+            }
+
+            QLineEdit:focus {
+                border: 1px solid #3AA0FF;
+                background-color: #F7FBFF;
+            }
+
+            QPushButton {
+                background-color: #E3EAF1;
+                border: 1px solid #AAB6C3;
+                border-radius: 8px;
+                color: #1B2430;
+                min-height: 20px;
+                padding: 4px 10px;
+            }
+
+            QPushButton:hover {
+                border: 1px solid #3AA0FF;
+                background-color: #D7E9FA;
+            }
+
+            QPushButton#pushButton {
+                background-color: #3FA2FF;
+                font-weight: bold;
+                color: white;
+                border: 1px solid #2E8BE0;
+            }
+
+            QPushButton#pushButton:hover {
+                background-color: #5AB1FF;
+            }
+
+            QCustomPlot#Plot {
+                background-color: #FFFFFF;
+                border: 1px solid #AAB6C3;
+                border-radius: 10px;
+            }
+
+            #label_offset {
+                color: #E67E00;
+                font-weight: bold;
+            }
+
+            #label_DAC {
+                color: #D93636;
+                font-weight: bold;
+            }
+            #label_latitude {
+                color: #1B2430;
+            }
+            #label_logitude {
+                color: #1B2430;
+            }
+
+        )");
+    }
+    else
+    {
+        this->setStyleSheet(R"(
+            QWidget {
+                background-color: #2B3138;
+                color: #F2F5F8;
+                font-family: "Segoe UI";
+                font-size: 11px;
+            }
+
+            QFrame#Header_2,
+            QFrame#formFrame,
+            QFrame#verticalFrame,
+            QFrame#horizontalFrame {
+                background-color: #39424C;
+                border: 1px solid #55606D;
+                border-radius: 12px;
+            }
+
+            QLabel {
+                color: #D5DDE5;
+                background: transparent;
+            }
+
+            QLineEdit {
+                background-color: #46515D;
+                border: 1px solid #667381;
+                border-radius: 8px;
+                color: #F2F5F8;
+                min-height: 28px;
+                padding-left: 8px;
+            }
+
+            QLineEdit:focus {
+                border: 1px solid #4DB3FF;
+                background-color: #4E5A67;
+            }
+
+            QPushButton {
+                background-color: #55606D;
+                border: 1px solid #748191;
+                border-radius: 8px;
+                color: white;
+                min-height: 20px;
+                padding: 4px 10px;
+            }
+
+            QPushButton:hover {
+                border: 1px solid #4DB3FF;
+                background-color: #627081;
+            }
+
+            QPushButton#pushButton {
+                background-color: #3FA2FF;
+                font-weight: bold;
+                color: white;
+                border: 1px solid #2E8BE0;
+            }
+
+            QPushButton#pushButton:hover {
+                background-color: #5AB1FF;
+            }
+
+            QCustomPlot#Plot {
+                background-color: #313941;
+                border: 1px solid #4DB3FF;
+                border-radius: 10px;
+            }
+
+            #label_offset {
+                color: #FF9800;
+                font-weight: bold;
+            }
+
+            #label_DAC {
+                color: #EF5350;
+                font-weight: bold;
+            }
+            #label_latitude {
+                color: #D5DDE5;
+            }
+            #label_logitude {
+                color: #D5DDE5;
+            }
+        )");
+    }
+}
+TestScreen::~TestScreen()
+{
+    delete ui;
+}

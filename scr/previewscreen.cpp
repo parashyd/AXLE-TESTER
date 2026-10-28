@@ -1,0 +1,591 @@
+#include "previewscreen.h"
+#include "testdetails.h"
+#include "DataFile.h"
+#include "ui_previewscreen.h"
+#include <QFile>
+#include <QTextStream>
+#include <QMessageBox>
+#include <QString>
+#include <QPdfWriter>
+#include <QPainter>
+#include <QDateTime> // For unique file names
+#include <sched.h>
+#include "shared_data.h"
+#include "matrix_keypad.h"
+#include "testscreen.h"
+#include "qcustomplot.h"
+#include "testdetail0.h"
+#include <QDir>
+#include <QDebug>
+#include "mainwindow.h"
+#include "gps.h"
+#include "preview_logger.h"
+extern SharedData* shared;
+
+PreviewLogger savefile;
+PreviewHeader saveFileHeader;
+
+PreviewScreen::PreviewScreen(QWidget *parent)
+    : QDialog(parent)
+    , ui(new Ui::PreviewScreen)
+{
+    this->setWindowFlags(Qt::FramelessWindowHint | Qt::Dialog);
+
+    ui->setupUi(this);
+    this->setStyleSheet(R"(
+    QWidget {
+        background-color: #FFFFFF;
+        color: #15181D;
+        font-family: "Segoe UI";
+        font-size: 11px;
+    }
+    )");
+
+    setupPlotAppearance();
+    ui->label_Model->setText("WT-2311D");
+    ui->label_Unit->setText(MachNo);
+    ui->label_OPvalue->setText(OperatorName);
+    ui->label_Divvalue->setText(Division);
+    ui->label_Secvalue->setText(Section);
+    if(Line!="Others"){
+    ui->label_LineValue->setText(Line);
+    }else{
+        ui->label_LineValue->setText(LineOthers);
+    }
+    ui->label_Railvalue->setText(Rail);
+    ui->label_TestTypeVal->setText(Testtype);
+    ui->label_ModeVal->setText(Mode);
+    ui->label_Kmval->setText(km);
+    ui->label_Mvalue->setText(M);
+    ui->label_TpVal->setText(TP);
+    ui->label_LocVal->setText(LocOfDefect);
+    ui->label_StattionsVal->setText(stations);
+    ui->label_RollMarkVal->setText(rollmark);
+    ui->label_WeldVal->setText(weld);
+    ui->label_ProbeVal->setText(Probe);
+    ui->label_ClassVal->setText(classVal);
+    ui->label_Fpval->setText(FPNFP);
+    ui->label_remarksval->setText(OthersObservation);
+    ui->lineEdit_PrevPH->setText(PrevPH);
+    ui->lineEdit_PrevBP->setText(PrevHMBP);
+    ui->label_PrevClaVal->setText(PrevClass);
+    ui->label_Chval->setText(QString::number(config.channel));
+    ui->label_CalsetVal->setText(QString::number(config.calset));
+
+
+    // ui->lineEdit_Date->setTexttring(Date);
+    // ui->lineEdit_time->setText(Time);
+
+    ui->label_Gainval->setText(QString::number(config.Gain));
+    ui->label_RJVal->setText(QString::number(config.reject));
+    ui->label_G1stVal->setText(QString::number(config.g1_start));
+    ui->label_G1EDVal->setText(QString::number(config.g1_end));
+    ui->label_TH1Val->setText(QString::number(config.th1));
+    ui->label_G2stval->setText(QString::number(config.g2_start));
+    ui->label_G2EDVal->setText(QString::number(config.g2_end));
+    ui->label_TH2val->setText(QString::number(config.th2));
+    ui->label_angleval->setText(QString::number(config.Angle));
+    ui->label_Delyval->setText(QString::number(config.delay));
+    ui->label_RangeVal->setText(QString::number(config.range));
+
+    QDateTime now = QDateTime::currentDateTime();
+    ui->label_Date->setText(now.toString("dd-MM-yyyy"));
+    ui->label_Time->setText(now.toString("HH:mm:ss"));
+
+    ui->label_latitude_2->setText(GPS_GetLatitude());
+    ui->label_logitude_2->setText(GPS_GetLongitude());
+    ui->label_G1->setStyleSheet("QLabel { color : #219601; }");
+    ui->label_G2->setStyleSheet("QLabel { color : #0818ff; }");
+    qDebug() <<"fetched data from previous screen";
+
+    //ui->Plot->setOpenGl(true);
+    plotGraphFromFilePS();
+    // QPixmap pixmap = this->grab();
+
+    // // --- Adjust JPG output size ---
+    // QSize jpgTargetSize(640, 480); // You can change this (640x480, 1024x768, etc.)
+    // QPixmap scaledJpg = pixmap.scaled(jpgTargetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    // QString jpgFileName = QString("PreviewScreen.jpg");
+    // scaledJpg.save(jpgFileName, "JPG", 100 );
+}
+
+
+void PreviewScreen::handleSocketKey(quint8 key)
+{
+
+    qDebug() << "Received key of preview (hex):" << QString("0x%1").arg(key, 2, 16, QLatin1Char('0')).toUpper();
+
+    switch (key)
+    {
+    case SAVE:
+        qDebug() << "Save" << key;
+        on_pushButton_save_clicked();
+        emit requestTestScreen();
+
+        break;
+
+    default:
+        break;
+    }
+}
+
+
+PreviewScreen::~PreviewScreen()
+{
+    delete ui;
+}
+
+void PreviewScreen::plotGraphFromFilePS()
+{
+    if (!shared) return;
+
+    // QVector<QPointF> filteredPoints;
+    // if (getFilteredPoints(config, filteredPoints) == 0) return;
+
+
+   // QVector<double> xData, yData;
+    maxX = 0;
+    maxY = 0;
+
+    // for (const QPointF& point : filteredPoints)
+    // {
+    //     double address = point.x();  // Already normalized address
+    //     double scaledY = (point.y() / 255.0) * 100.0;
+
+    //     xData.append(address);
+    //     yData.append(scaledY);
+
+    //     maxX = qMax<int>(maxX, static_cast<int>(address));
+    //     maxY = qMax<double>(maxY, scaledY);
+
+    //     //qDebug() << "x-axis" << address << "y-axis" << scaledY;
+    // }
+
+    if (xData.isEmpty()) return;
+
+    // No need to subtract delay * DELAY_FACTOR here, already done
+    QVector<double> xDataNormalized;
+    if (freeze){
+        for (double addr : xDataFreeze)
+            config.Angle>30?xDataNormalized.append(addr / RANGE_FACTOR_GT30 ):xDataNormalized.append(addr / RANGE_FACTOR_LT30 );
+    }else{
+        for (double addr : xData)
+            config.Angle>30?xDataNormalized.append(addr / RANGE_FACTOR_GT30 ):xDataNormalized.append(addr / RANGE_FACTOR_LT30 );
+    }
+    double normG1Start = (config.g1_start * config.range)/100;
+    double normG1End   = (config.g1_end * config.range)/100;
+
+    double normG2Start = (config.g2_start * config.range) / 100.0;
+    double normG2End   = (config.g2_end * config.range) / 100.0;
+
+    double ph1Value = 0, ph2Value = 0, phValue=0;
+    int peakIndex1 = -1, peakIndex2 = -1,peakIndex=-1;
+
+    for (int i = 0; i < xDataNormalized.size(); i++)
+    {
+        double x = xDataNormalized[i];
+        if(freeze)
+        {
+            if (yDataFreeze[i] > phValue)
+            {
+                peakIndex = i;
+                phValue = qMax(phValue, yDataFreeze[i]);
+            }
+        }
+        else
+        {
+            if (x >= normG1Start && x <= normG1End)
+            {
+                if (yData[i] > ph1Value) peakIndex1 = i;
+                ph1Value = qMax(ph1Value, yData[i]);
+            }
+            if (x >= normG2Start && x <= normG2End)
+            {
+                if (yData[i] > ph2Value) peakIndex2 = i;
+                ph2Value = qMax(ph2Value, yData[i]);
+            }
+        }
+    }
+
+    double bp1Value = 0, bp2Value = 0;
+
+    if(!freeze)
+    {
+        for (int i = peakIndex1; i >= 0; i--)
+        {
+            if (yData[i] == 0)
+            {
+                bp1Value = xDataNormalized[i];
+                break;
+            }
+        }
+        for (int i = peakIndex2; i >= 0; i--)
+        {
+            if (yData[i] == 0)
+            {
+                bp2Value = xDataNormalized[i];
+                break;
+            }
+
+        }
+    }
+
+    if(freeze)
+    {
+        int Lm=0,Rm=0, count = (int)config.range / 20;
+        for(int i = peakIndex;i>=0;i--)
+        {
+            if(yDataFreeze[i] == 0)
+            {
+                if(count == ((int)config.range /20))
+                {
+                    Lm = xDataNormalized[i] * 100 / config.range;
+                }
+                else if(count == 0){
+                    break;
+                }
+                count--;
+            }
+            else{
+                count = config.range / 20;
+            }
+        }
+
+        count = config.range /20;
+
+        for(int i =peakIndex;i<xDataNormalized.size();i++)
+        {
+            if(yDataFreeze[i] == 0)
+            {
+                if(count == ((int)config.range /20))
+                {
+                    Rm = xDataNormalized[i] * 100 / config.range;
+                }
+                else if(count == 0){
+                    break;
+                }
+                count--;
+            }
+            else{
+                count = config.range / 20;
+            }
+        }
+        ui->label_Hmval->setText(QString::number(Lm) + "-" +QString::number(Rm) );
+    }
+    else
+    {
+        ui->label_HM->hide();
+        ui->label_Hmval->hide();
+    }
+
+    if(freeze)
+    {
+        ui->label_G1->hide();
+        ui->label_G2->hide();
+
+        ui->lineEdit_PHG2->hide();
+        ui->lineEdit_BPG2->hide();
+        ui->lineEdit_SDG2->hide();
+        ui->lineEdit_DG2->hide();
+
+        ui->lineEdit_PHG1->setText(QString::number(phValue, 'd', 0));
+        ui->lineEdit_BPG1->setText(QString::number(xDataNormalized[peakIndex],'d', 0));
+        ui->lineEdit_DG1->setText(QString::number(xDataNormalized[peakIndex] * cos(config.Angle * M_PI / 180.0), 'd', 0));
+        ui->lineEdit_SDG1->setText(QString::number(xDataNormalized[peakIndex] * sin(config.Angle * M_PI / 180.0), 'd', 0));
+    }
+    // Update UI
+    else{
+        ui->lineEdit_PHG1->setText(QString::number(ph1Value, 'd', 0));
+        ui->lineEdit_PHG2->setText(QString::number(ph2Value, 'd', 0));
+
+        ui->lineEdit_BPG1->setText(QString::number(bp1Value, 'd', 0));
+        ui->lineEdit_BPG2->setText(QString::number(bp2Value, 'd', 0));
+
+        ui->lineEdit_DG1->setText(QString::number(bp1Value * cos(config.Angle * M_PI / 180.0), 'd', 0));
+        ui->lineEdit_SDG1->setText(QString::number(bp1Value * sin(config.Angle * M_PI / 180.0), 'd', 0));
+
+        ui->lineEdit_DG2->setText(QString::number(bp2Value * cos(config.Angle * M_PI / 180.0), 'd', 0));
+        ui->lineEdit_SDG2->setText(QString::number(bp2Value * sin(config.Angle * M_PI / 180.0), 'd', 0));
+    }
+
+
+
+    // ui->lineEdit_P2P->setText(QString::number(
+    //     abs(ui->lineEdit_DG1->text().toInt() - ui->lineEdit_DG2->text().toInt()), 'd', 0));
+
+    // ------------------ Plot Drawing ------------------
+    ui->Plot->clearGraphs();
+
+    // Threshold lines (no delay offset needed anymore)
+    ui->Plot->addGraph();
+    ui->Plot->graph(0)->setData(QVector<double>{normG1Start,normG1End},
+                                QVector<double>{(double)config.th1,(double) config.th1});
+    //qDebug() <<"Gs"<<normG1Start <<"GE"<<normG1End;
+    ui->Plot->graph(0)->setPen(QPen(QColor("#219601"), 2)); // Green
+
+    ui->Plot->addGraph();
+    ui->Plot->graph(1)->setData(QVector<double>{normG2Start , normG2End},
+                                QVector<double>{(double)config.th2,( double)config.th2});
+    ui->Plot->graph(1)->setPen(QPen(QColor("#0818ff"), 2)); // Blue
+
+    ui->Plot->xAxis->setRange(0, config.range);
+
+    ui->Plot->addGraph();
+    if (config.channel == 1){
+         ui->Plot->graph(2)->setPen(QPen(Qt::magenta, 2));
+    }
+    else{
+         ui->Plot->graph(2)->setPen(QPen(Qt::yellow, 2));
+    }
+
+    if(freeze){
+        ui->Plot->graph(2)->setData(xDataNormalized, yDataFreeze);
+        ui->Plot->graph(2)->setLineStyle(QCPGraph::lsImpulse);
+    }
+    else{
+        ui->Plot->graph(2)->setData(xDataNormalized, yData);
+        ui->Plot->graph(2)->setLineStyle(QCPGraph::lsLine);
+    }
+
+    ui->Plot->replot();
+}
+
+
+void PreviewScreen::setupPlotAppearance()
+{
+    ui->Plot->setFixedSize(420, 270);
+    ui->Plot->setBackground(Qt::white);         // Changed the color
+
+    // Configure a fixed ticker for the X-axis
+    QSharedPointer<QCPAxisTickerFixed> xTicker(new QCPAxisTickerFixed);
+
+    xTicker->setTickStep(config.range/(10));
+    xTicker->setScaleStrategy(QCPAxisTickerFixed::ssNone);
+    ui->Plot->xAxis->setTicker(xTicker);
+    ui->Plot->xAxis->setBasePen(QPen(Qt::black));
+    ui->Plot->xAxis->setTickPen(QPen(Qt::black));
+    ui->Plot->xAxis->setTickLabelColor(Qt::black);
+    ui->Plot->xAxis->grid()->setPen(QPen(Qt::gray));
+    ui->Plot->xAxis->grid()->setSubGridPen(QPen(Qt::darkGray));
+
+    // Configure a fixed ticker for the Y-axis
+    QSharedPointer<QCPAxisTickerFixed> yTicker(new QCPAxisTickerFixed);
+    yTicker->setTickStep(10);  // Set step for 10 intervals
+    yTicker->setScaleStrategy(QCPAxisTickerFixed::ssNone);
+    ui->Plot->yAxis->setTicker(yTicker);
+    ui->Plot->yAxis->setBasePen(QPen(Qt::black));
+    ui->Plot->yAxis->setTickPen(QPen(Qt::black));
+    ui->Plot->yAxis->setTickLabelColor(Qt::black);
+    ui->Plot->yAxis->grid()->setPen(QPen(Qt::gray));
+    ui->Plot->yAxis->grid()->setSubGridPen(QPen(Qt::darkGray));
+
+    ui->Plot->yAxis->setTickLabelSide(QCPAxis::lsInside);
+    ui->Plot->xAxis->setTickLabelSide(QCPAxis::lsOutside);
+
+    // Set range to ensure the grid fits within the plot
+    ui->Plot->xAxis->setRange(0, 100);
+    ui->Plot->yAxis->setRange(0, 100);
+
+    ui->Plot->replot();
+}
+
+
+void PreviewScreen::on_pushButton_save_clicked()
+{
+    QString baseDir = "SavedData";
+
+    // --- Ensure directories exist ---
+    QDir dir;
+    if (!dir.exists(baseDir))
+        dir.mkpath(baseDir);
+
+    QString dateFolder = QString("%1/%2%3").arg(baseDir).arg(QDate::currentDate().toString("dd-MM-yyyy")).arg(Line);
+    if (!dir.exists(dateFolder))
+        dir.mkpath(dateFolder);
+
+    QPixmap pixmap = this->grab();
+
+    QSize jpgTargetSize(640, 480);
+    QPixmap scaledJpg = pixmap.scaled(jpgTargetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    QString jpgFileName = QString("%1/%2_%3_%4-%5_%6_CH-%7.jpg").arg(dateFolder).arg(km).arg(M).arg(Rail).arg(WeldNo).arg(config.calset).arg(config.channel);
+    int temp=1;
+
+    while(QFile::exists(jpgFileName))
+    {
+        jpgFileName =  QString("%1/%2_%3_%4-%5_%6_CH-%7(%8).jpg").arg(dateFolder).arg(km).arg(M).arg(Rail).arg(WeldNo).arg(config.calset).arg(config.channel).arg(temp);
+        temp++;
+    }
+    QString savefileName;
+
+    if(freeze)
+    {
+        savefileName = QString("%1/%2_%3_%4-%5_%6_CH-%7.wtpf").arg(dateFolder).arg(km).arg(M).arg(Rail).arg(WeldNo).arg(config.calset).arg(config.channel);
+        int temp=1;
+        while(QFile::exists(savefileName))
+        {
+            savefileName =  QString("%1/%2_%3_%4-%5_%6_CH-%7(%8).wtpf").arg(dateFolder).arg(km).arg(M).arg(Rail).arg(WeldNo).arg(config.calset).arg(config.channel).arg(temp);
+            temp++;
+        }
+        LoadSaveFileHeader();
+        if(!savefile.open(savefileName,saveFileHeader)){
+            qDebug() << "Cannot open wtpf file"  ;
+        }
+        savefile.writeFrame(yDataFreeze);
+        savefile.close();
+    }
+    else{
+        savefileName = QString("%1/%2_%3_%4-%5_%6_CH-%7.wtp").arg(dateFolder).arg(km).arg(M).arg(Rail).arg(WeldNo).arg(config.calset).arg(config.channel);
+        int temp=1;
+        while(QFile::exists(savefileName))
+        {
+            savefileName =  QString("%1/%2_%3_%4-%5_%6_CH-%7(%8).wtp").arg(dateFolder).arg(km).arg(M).arg(Rail).arg(WeldNo).arg(config.calset).arg(config.channel).arg(temp);
+            temp++;
+        }
+        LoadSaveFileHeader();
+
+        if(!savefile.open(savefileName,saveFileHeader))   {
+            qDebug() << "Cannot open wtp file"  ;
+
+        }
+        savefile.writeFrame(yData);
+        savefile.close();
+    }
+
+
+
+
+    if (!scaledJpg.save(jpgFileName, "JPG", 90))
+        qWarning() << "Failed to save JPG:" << jpgFileName;
+    else
+        qDebug() << "[INFO] Saved JPG:" << jpgFileName;
+
+    // --- Prepare PDF file path ---
+    /*QString pdfFileName = QString("%1/Wheel_%2.pdf").arg(baseDir).arg(wheelNo);
+
+    // --- Setup PDF writer ---
+    QPdfWriter pdfWriter(pdfFileName);
+    pdfWriter.setPageSize(QPageSize(QPageSize::A4));
+    pdfWriter.setResolution(300); // 300 DPI for clear print quality
+
+    QPainter painter(&pdfWriter);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::TextAntialiasing);
+
+    int pdfWidth = pdfWriter.width();
+    int pdfHeight = pdfWriter.height();
+    int topMargin = 200;
+    int sideMargin = 80;
+
+    // --- Scale image to fit nicely within PDF page ---
+    int availableWidth = pdfWidth - (2 * sideMargin);
+    int availableHeight = pdfHeight - (topMargin + 200);
+    QPixmap scaledPdf = pixmap.scaled(availableWidth, availableHeight,
+                                      Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
+    // --- Header text ---
+    QFont headerFont;
+    headerFont.setPointSize(14);
+    headerFont.setBold(true);
+    painter.setFont(headerFont);
+
+    QString header = QString("Wheel No: %1 | Frame No: %2 | Operator: %3 | Time: %4")
+                         .arg(wheelNo)
+                         .arg(frameNo)
+                         .arg(operatorName)
+                         .arg(QDateTime::currentDateTime().toString("dd-MM-yyyy hh:mm:ss"));
+
+    painter.drawText(QRect(0, 0, pdfWidth, topMargin), Qt::AlignCenter, header);
+
+    // --- Draw scaled image centered on page ---
+    int x = (pdfWidth - scaledPdf.width()) / 2;
+    int y = topMargin;
+    painter.drawPixmap(x, y, scaledPdf.width(), scaledPdf.height(), scaledPdf);
+
+    painter.end();
+    qDebug() << "[INFO] Saved PDF:" << pdfFileName;
+
+    // --- Update TestDetails.txt ---
+    QFile detailsFile(baseDir + "/TestDetails.txt");
+    if (detailsFile.open(QIODevice::Append | QIODevice::Text)) {
+        QTextStream out(&detailsFile);
+        out << QString("Wheel:%1, Frame:%2, Operator:%3, Time:%4\n")
+                   .arg(wheelNo)
+                   .arg(frameNo)
+                   .arg(operatorName)
+                   .arg(QDateTime::currentDateTime().toString("hh:mm:ss dd-MM-yyyy"));
+        detailsFile.close();
+    }
+
+    // --- Update SummaryLog.txt when last frame is completed ---
+    const int maxFramesPerWheel = 6; // change if needed
+    if (frameNo.toInt() >= maxFramesPerWheel) {
+        QFile summaryFile(baseDir + "/SummaryLog.txt");
+        if (summaryFile.open(QIODevice::Append | QIODevice::Text)) {
+            QTextStream out(&summaryFile);
+            out << QString("Wheel %1 completed with %2 frames: %3\n")
+                       .arg(wheelNo)
+                       .arg(frameNo)
+                       .arg(pdfFileName);
+            summaryFile.close();
+        }
+        qDebug() << "[INFO] Wheel" << wheelNo << "completed.";
+    }*/
+
+}
+void PreviewScreen::LoadSaveFileHeader(){
+    saveFileHeader.opName = ui->label_OPvalue->text();
+    saveFileHeader.modelUnit = ui->label_Model->text() + "-"+ ui->label_Unit->text();
+    saveFileHeader.division = ui->label_Divvalue->text();
+    saveFileHeader.section = ui->label_Secvalue->text();
+    saveFileHeader.dateTime = ui->label_Date->text()+ "&"+ ui->label_Time->text();
+    saveFileHeader.line = ui->label_LineValue->text();
+    saveFileHeader.rail = ui->label_Railvalue->text();
+    saveFileHeader.testType = ui->label_TestTypeVal->text();
+    saveFileHeader.mode = ui->label_ModeVal->text();
+
+    saveFileHeader.km = ui->label_Kmval->text();
+    saveFileHeader.m = ui->label_Mvalue->text();
+    saveFileHeader.tp = ui->label_TpVal->text();
+    saveFileHeader.loc = ui->label_LocVal->text();
+    saveFileHeader.stations = ui->label_StattionsVal->text();
+    saveFileHeader.rollMark = ui->label_RollMarkVal->text();
+    saveFileHeader.weld = ui->label_WeldVal->text();
+    saveFileHeader.probe= ui->label_ProbeVal->text();
+    saveFileHeader.calset = ui->label_CalsetVal->text();
+    saveFileHeader.ch = ui->label_Chval->text();
+
+    saveFileHeader.phg1 = ui->lineEdit_PHG1->text();
+    saveFileHeader.phg2 = ui->lineEdit_PHG2->text();
+    saveFileHeader.prevPH = ui->lineEdit_PrevPH->text();
+
+    saveFileHeader.bpg1 = ui->lineEdit_BPG1->text();
+    saveFileHeader.bpg2 = ui->lineEdit_BPG2->text();
+    saveFileHeader.prevBP = ui->lineEdit_PrevBP->text();
+
+    saveFileHeader.dg1 = ui->lineEdit_DG1->text();
+    saveFileHeader.dg2 = ui->lineEdit_DG2->text();
+
+    saveFileHeader.sdg1 = ui->lineEdit_SDG1->text();
+    saveFileHeader.sdg2 = ui->lineEdit_SDG2->text();
+
+    saveFileHeader.gain = ui->label_Gainval->text();
+    saveFileHeader.dely= ui->label_Delyval->text();
+    saveFileHeader.range = ui->label_RangeVal->text();
+    saveFileHeader.rj = ui->label_RJVal->text();
+    saveFileHeader.hm = ui->label_Hmval->text();
+    saveFileHeader.classPrevClass = ui->label_ClassVal->text()+", "+ui->label_PrevClaVal->text();
+    saveFileHeader.g1st = ui->label_G1stVal->text();
+    saveFileHeader.g1ed= ui->label_G1EDVal->text();
+    saveFileHeader.th1 = ui->label_TH1Val->text();
+    saveFileHeader.g2st = ui->label_G2stval->text();
+    saveFileHeader.g2ed= ui->label_G2EDVal->text();
+    saveFileHeader.th2 = ui->label_TH2val->text();
+
+    saveFileHeader.jogPlate= ui->label_Fpval->text();
+    saveFileHeader.angle = ui->label_angleval->text();
+    saveFileHeader.remarks= ui->label_remarksval->text();
+
+}
+
+
+
