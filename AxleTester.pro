@@ -13,6 +13,7 @@ INCLUDEPATH += include/
 VPATH += scr/
 
 SOURCES += \
+    scr/daccurve.cpp \
     scr/gps.c \
     scr/openlog1.cpp \
     scr/configscreen.cpp \
@@ -35,6 +36,7 @@ SOURCES += \
     scr/settings.cpp
 
 HEADERS += \
+    include/daccurve.h \
     include/gps.h \
     include/configscreen.h \
     include/Audio.h \
@@ -66,6 +68,7 @@ FORMS += \
     testdetail0.ui \
     testdetails.ui \
     testscreen.ui \
+    daccurve.ui \
     viewlogdata.ui
 
 # Default rules for deployment.

@@ -8,6 +8,7 @@
 #include <QKeyEvent>
 #include <QString>
 #include <QList>
+#include "daccurve.h"
 
 extern const char *ORG_NAME;
 extern const char *APP_NAME;
@@ -55,6 +56,8 @@ private slots:
 
 private:
     Ui::settings *ui;
+
+    DacCurveDialog *dacScreen = nullptr;
 
     void loadSettings();
     void saveSettings();

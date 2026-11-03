@@ -15,6 +15,7 @@
 #include <QLineEdit>
 #include <QProcess>
 #include "matrix_keypad.h"
+#include "daccurve.h"
 
 const char *ORG_NAME = "Paras Electronics";
 const char *APP_NAME = "WT2311D";
@@ -98,11 +99,22 @@ settings::settings(QWidget *parent)
     ui->buttonApply->setFocusPolicy(Qt::StrongFocus);
     ui->buttonCancel->setFocusPolicy(Qt::StrongFocus);
     ui->buttonOk->setFocusPolicy(Qt::StrongFocus);
+    ui->buttonDacCurve->setFocusPolicy(Qt::StrongFocus);
 
     connect(ui->comboChannel1, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &settings::updateChannel1Color);
     connect(ui->comboChannel2, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &settings::updateChannel2Color);
+
+    connect(ui->buttonDacCurve, &QPushButton::clicked, this, [this]() {
+        //DacCurveDialog dialog(this);
+        dacScreen = new DacCurveDialog(this);
+        if (theme().compare("Light", Qt::CaseInsensitive) == 0)
+            dacScreen->setStyleSheet(LIGHT_THEME);
+        else
+            dacScreen->setStyleSheet(DARK_THEME);
+        dacScreen->show();
+    });
 
     connect(ui->buttonApply, &QPushButton::clicked,
             this, &settings::applySettings);
@@ -473,6 +485,7 @@ QList<QWidget*> settings::navigationWidgets() const
         ui->lineEditHour,
         ui->lineEditMinute,
         ui->lineEditSecond,
+        ui->buttonDacCurve,
         ui->buttonReset,
         ui->buttonApply,
         ui->buttonCancel,
@@ -519,6 +532,17 @@ void settings::handleSocketKey(int key)
 {
     const QList<QWidget*> widgets = navigationWidgets();
 
+    if (key == ESC){
+        if(dacScreen != nullptr){
+            dacScreen->close();
+            dacScreen =nullptr;
+            return;
+        }
+        else{
+            ui->buttonCancel->click();
+            return;
+        }
+    }
     if (key == UP)
     {
         m_currentIndex--;
@@ -543,6 +567,39 @@ void settings::handleSocketKey(int key)
     if (!current)
         return;
 
+    if (key == LEFT || key == RIGHT)
+    {
+        const int step = (key == RIGHT) ? 1 : -1;
+
+        if (auto *combo = qobject_cast<QComboBox*>(current))
+        {
+            int index = combo->currentIndex() + step;
+            if (index < 0)
+                index = combo->count() - 1;
+            if (index >= combo->count())
+                index = 0;
+            combo->setCurrentIndex(index);
+            return;
+        }
+
+        if (auto *slider = qobject_cast<QSlider*>(current))
+        {
+            slider->setValue(slider->value() + step * slider->pageStep());
+            return;
+        }
+
+        // For line edits, LEFT/RIGHT are not used for value changes.
+        return;
+    }
+
+    if (key == OK)
+    {
+        if (auto *button = qobject_cast<QPushButton*>(current))
+        {
+            button->click();
+            return;
+        }
+    }
     /*
      * Same keypad mapping used by TestScreen:
      * 1 -> 1, A/B/C -> 1
@@ -668,37 +725,5 @@ void settings::handleSocketKey(int key)
         }
     }
 
-    if (key == LEFT || key == RIGHT)
-    {
-        const int step = (key == RIGHT) ? 1 : -1;
 
-        if (auto *combo = qobject_cast<QComboBox*>(current))
-        {
-            int index = combo->currentIndex() + step;
-            if (index < 0)
-                index = combo->count() - 1;
-            if (index >= combo->count())
-                index = 0;
-            combo->setCurrentIndex(index);
-            return;
-        }
-
-        if (auto *slider = qobject_cast<QSlider*>(current))
-        {
-            slider->setValue(slider->value() + step * slider->pageStep());
-            return;
-        }
-
-        // For line edits, LEFT/RIGHT are not used for value changes.
-        return;
-    }
-
-    if (key == OK)
-    {
-        if (auto *button = qobject_cast<QPushButton*>(current))
-        {
-            button->click();
-            return;
-        }
-    }
 }

@@ -42,7 +42,7 @@
         <string/>
        </property>
        <property name="pixmap">
-        <pixmap resource="resources.qrc">:/images/Pasted image.png</pixmap>
+        <pixmap>:/images/Pasted image.png</pixmap>
        </property>
        <property name="scaledContents">
         <bool>true</bool>
@@ -61,7 +61,7 @@
         <string/>
        </property>
        <property name="pixmap">
-        <pixmap resource="resources.qrc">:/images/Pasted image (2).png</pixmap>
+        <pixmap>:/images/Pasted image (2).png</pixmap>
        </property>
        <property name="scaledContents">
         <bool>true</bool>
@@ -80,7 +80,7 @@
         <string/>
        </property>
        <property name="pixmap">
-        <pixmap resource="resources.qrc">:/images/Pasted image (3).png</pixmap>
+        <pixmap>:/images/Pasted image (3).png</pixmap>
        </property>
        <property name="scaledContents">
         <bool>true</bool>
@@ -99,7 +99,7 @@
         <string/>
        </property>
        <property name="pixmap">
-        <pixmap resource="resources.qrc">:/images/Pasted image (4).png</pixmap>
+        <pixmap>:/images/Pasted image (4).png</pixmap>
        </property>
        <property name="scaledContents">
         <bool>true</bool>
@@ -118,7 +118,7 @@
         <string/>
        </property>
        <property name="pixmap">
-        <pixmap resource="resources.qrc">:/images/Pasted image (5).png</pixmap>
+        <pixmap>:/images/Pasted image (5).png</pixmap>
        </property>
        <property name="scaledContents">
         <bool>true</bool>
@@ -164,9 +164,9 @@
    <widget class="QLabel" name="label_UnitNo">
     <property name="geometry">
      <rect>
-      <x>200</x>
+      <x>160</x>
       <y>250</y>
-      <width>221</width>
+      <width>311</width>
       <height>31</height>
      </rect>
     </property>

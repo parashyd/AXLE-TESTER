@@ -92,7 +92,8 @@ MainWindow::MainWindow(QWidget *parent)
     ui->label_UnitNo->setStyleSheet(
         "background-color: transparent;"
         );
-    ui->label_UnitNo->setText("WT-2311D - "+MachNo);
+    ui->label_UnitNo->setText("Ultrasonic Flaw Detector");
+    //ui->label_UnitNo->setText("WT-2311D - "+MachNo);
 
     // QPixmap pixmap = this->grab();
 
@@ -198,8 +199,9 @@ void MainWindow::onSocketReadyRead()
             return;
         }
         if(settingsWindow && settingsWindow->isVisible()){
-            settingsWindow->close();
-            settingsWindow =nullptr;
+            // settingsWindow->close();
+            // settingsWindow =nullptr;
+            settingsWindow->handleSocketKey(static_cast<int>(key));
             return;
         }
 
@@ -370,13 +372,15 @@ void MainWindow::navScreen(void)
                         applyMainWindowTheme();
                         updateMainMenuImages();
                     });
+            settingsWindow->show();
 
             connect(settingsWindow, &QObject::destroyed, this, [this]()
                     {
+                        qDebug()<<"Closing settingsWindow";
+                        settingsWindow->close();
                         settingsWindow = nullptr;
                     });
 
-            settingsWindow->show();
         }
 
 }

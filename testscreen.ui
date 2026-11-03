@@ -806,6 +806,25 @@
             </property>
            </widget>
           </item>
+          <item row="7" column="0" colspan="2">
+           <widget class="QComboBox" name="comboBox_pos">
+            <item>
+             <property name="text">
+              <string>Head</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Web</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Flange</string>
+             </property>
+            </item>
+           </widget>
+          </item>
           <item row="8" column="0">
            <widget class="QLabel" name="label_G1ST">
             <property name="text">
@@ -965,25 +984,6 @@
               <height>0</height>
              </size>
             </property>
-           </widget>
-          </item>
-          <item row="7" column="0" colspan="2">
-           <widget class="QComboBox" name="comboBox_pos">
-            <item>
-             <property name="text">
-              <string>Head</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Web</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Flange</string>
-             </property>
-            </item>
            </widget>
           </item>
          </layout>
