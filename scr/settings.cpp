@@ -109,6 +109,7 @@ settings::settings(QWidget *parent)
     connect(ui->buttonDacCurve, &QPushButton::clicked, this, [this]() {
         //DacCurveDialog dialog(this);
         dacScreen = new DacCurveDialog(this);
+        dacScreen->setAttribute(Qt::WA_DeleteOnClose);
         if (theme().compare("Light", Qt::CaseInsensitive) == 0)
             dacScreen->setStyleSheet(LIGHT_THEME);
         else
@@ -543,6 +544,11 @@ void settings::handleSocketKey(int key)
             return;
         }
     }
+    if(dacScreen!=nullptr && dacScreen->isVisible()){
+        dacScreen->handleSocketKey(key);
+        return;
+    }
+
     if (key == UP)
     {
         m_currentIndex--;

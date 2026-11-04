@@ -2,6 +2,9 @@
 <ui version="4.0">
  <class>DacCurveDialog</class>
  <widget class="QDialog" name="DacCurveDialog">
+  <property name="enabled">
+   <bool>true</bool>
+  </property>
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -309,31 +312,11 @@
           </property>
          </widget>
         </item>
-        <item row="9" column="0">
-         <widget class="QLabel" name="label_G2ST">
-          <property name="text">
-           <string>G2ST</string>
-          </property>
-         </widget>
-        </item>
-        <item row="9" column="1">
-         <widget class="QLineEdit" name="lineEdit_G2ST">
-          <property name="sizePolicy">
-           <sizepolicy hsizetype="Expanding" vsizetype="Minimum">
-            <horstretch>0</horstretch>
-            <verstretch>0</verstretch>
-           </sizepolicy>
-          </property>
-          <property name="minimumSize">
-           <size>
-            <width>40</width>
-            <height>0</height>
-           </size>
-          </property>
-         </widget>
-        </item>
         <item row="10" column="0">
          <widget class="QLabel" name="label_G2ED">
+          <property name="enabled">
+           <bool>true</bool>
+          </property>
           <property name="text">
            <string>G2ED</string>
           </property>
@@ -341,6 +324,9 @@
         </item>
         <item row="10" column="1">
          <widget class="QLineEdit" name="lineEdit_G2ED">
+          <property name="enabled">
+           <bool>true</bool>
+          </property>
           <property name="sizePolicy">
            <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
             <horstretch>0</horstretch>
@@ -357,6 +343,9 @@
         </item>
         <item row="11" column="0">
          <widget class="QLabel" name="label_TH2">
+          <property name="enabled">
+           <bool>true</bool>
+          </property>
           <property name="text">
            <string>TH2</string>
           </property>
@@ -364,6 +353,9 @@
         </item>
         <item row="11" column="1">
          <widget class="QLineEdit" name="lineEdit_TH2">
+          <property name="enabled">
+           <bool>true</bool>
+          </property>
           <property name="sizePolicy">
            <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
             <horstretch>0</horstretch>
@@ -401,6 +393,35 @@
           </property>
          </widget>
         </item>
+        <item row="9" column="1">
+         <widget class="QLineEdit" name="lineEdit_G2ST">
+          <property name="enabled">
+           <bool>true</bool>
+          </property>
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Minimum">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>40</width>
+            <height>0</height>
+           </size>
+          </property>
+         </widget>
+        </item>
+        <item row="9" column="0">
+         <widget class="QLabel" name="label_G2ST">
+          <property name="enabled">
+           <bool>true</bool>
+          </property>
+          <property name="text">
+           <string>G2ST</string>
+          </property>
+         </widget>
+        </item>
        </layout>
       </widget>
      </item>
@@ -419,6 +440,9 @@
       <widget class="QLineEdit" name="lineEdit_PH"/>
      </item>
      <item>
+      <widget class="QLineEdit" name="lineEdit_DacPH"/>
+     </item>
+     <item>
       <widget class="QLabel" name="label_BP">
        <property name="text">
         <string>BP</string>
@@ -427,6 +451,9 @@
      </item>
      <item>
       <widget class="QLineEdit" name="lineEdit_BP"/>
+     </item>
+     <item>
+      <widget class="QLineEdit" name="lineEdit_DacBP"/>
      </item>
      <item>
       <widget class="QLabel" name="label_D">
@@ -439,6 +466,9 @@
       <widget class="QLineEdit" name="lineEdit_D"/>
      </item>
      <item>
+      <widget class="QLineEdit" name="lineEdit_2"/>
+     </item>
+     <item>
       <widget class="QLabel" name="label">
        <property name="text">
         <string>SD</string>
@@ -447,6 +477,9 @@
      </item>
      <item>
       <widget class="QLineEdit" name="lineEdit_SD"/>
+     </item>
+     <item>
+      <widget class="QLineEdit" name="lineEdit_DacSD"/>
      </item>
     </layout>
    </item>

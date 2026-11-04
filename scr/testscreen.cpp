@@ -127,7 +127,6 @@ TestScreen::TestScreen(QWidget *parent)
 
     const int duty = AudioLevel * 10000;
 
-    Buzzerinit();
     BuzzerDuty(duty);
 
     m_audioPercent = static_cast<float>(AudioLevel);
@@ -198,8 +197,8 @@ TestScreen::TestScreen(QWidget *parent)
     g1Line->setPen(QPen(QColor("#219601"), 2));  // Green
     g2Line->setPen(QPen(QColor("#0818ff"), 2));  // Blue
     //waveformGraph->setPen(QPen(Qt::yellow, 2));
-    g1border->setPen(QPen(Qt::white, 6));
-    g2border->setPen(QPen(Qt::white, 6));
+    g1border->setPen(QPen(QColor("#008080"), 6));
+    g2border->setPen(QPen(QColor("#008080"), 6));
     g1border->setVisible(false);
     g2border->setVisible(false);
 
@@ -597,6 +596,41 @@ void TestScreen::onSocketReadyRead(quint8 key)
 
             focusGate1(1);
         }
+        if(key == '7')
+        {
+            recordingFlag = "DFWO";
+            ui->label_flag->setText(recordingFlag);
+            ui->label_flag->setVisible(true);
+            logfile.setFlag(recordingFlag, "F7");
+
+            qDebug() << "[Recording] Flag 7 ->"
+                     << recordingFlag;
+
+        }
+
+        if(key == '8')
+        {
+            recordingFlag = "DFWR";
+            ui->label_flag->setText(recordingFlag);
+            ui->label_flag->setVisible(true);
+            logfile.setFlag(recordingFlag, "F8");
+
+            qDebug() << "[Recording] Flag 8 ->"
+                     << recordingFlag;
+
+        }
+
+        if(key=='9')
+        {
+            recordingFlag = "DFWN";
+            ui->label_flag->setText(recordingFlag);
+            ui->label_flag->setVisible(true);
+            logfile.setFlag(recordingFlag, "F9");
+
+            qDebug() << "[Recording] Flag 9 ->"
+                     << recordingFlag;
+
+        }
     }
 
     if (key == ESC){
@@ -987,59 +1021,6 @@ void TestScreen::onSocketReadyRead(quint8 key)
         }
         break;
 
-    case '7':
-    {
-        if (isRecording())
-        {
-            recordingFlag = "DFWO";
-
-            ui->label_flag->setText(recordingFlag);
-            ui->label_flag->setVisible(true);
-
-            logfile.setFlag(recordingFlag, "F7");
-
-            qDebug() << "[Recording] Flag 7 ->"
-                     << recordingFlag;
-        }
-
-        break;
-    }
-
-    case '8':
-    {
-        if (isRecording())
-        {
-            recordingFlag = "DFWR";
-
-            ui->label_flag->setText(recordingFlag);
-            ui->label_flag->setVisible(true);
-
-            logfile.setFlag(recordingFlag, "F8");
-
-            qDebug() << "[Recording] Flag 8 ->"
-                     << recordingFlag;
-        }
-
-        break;
-    }
-
-    case '9':
-    {
-        if (isRecording())
-        {
-            recordingFlag = "DFWN";
-
-            ui->label_flag->setText(recordingFlag);
-            ui->label_flag->setVisible(true);
-
-            logfile.setFlag(recordingFlag, "F9");
-
-            qDebug() << "[Recording] Flag 9 ->"
-                     << recordingFlag;
-        }
-
-        break;
-    }
 
     default:
         if (testdetails && testdetails->isVisible())
@@ -1759,11 +1740,12 @@ inline void TestScreen::plotGate1(int replotRequired,int ParamCalc)
     if(replotRequired)
         ui->Plot->replot();
 }
+
 inline void TestScreen::plotGate2(int replotRequired,int ParamCalc)
 {
     //QVector<double> xNorm;
     ph1Value =  0;
-    peakIndex1 =  -1;
+    peakIndex2 =  -1;
     //xNorm.reserve(xData.size());
     double g2Start = (config.g2_start * config.range) / 100.0;
     double g2End   = (config.g2_end   * config.range) / 100.0;

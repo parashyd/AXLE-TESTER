@@ -957,7 +957,8 @@ daccurve.o: scr/daccurve.cpp include/daccurve.h \
 		include/shared_data.h \
 		ui_daccurve.h \
 		include/settings.h \
-		include/Audio.h
+		include/Audio.h \
+		include/matrix_keypad.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o daccurve.o scr/daccurve.cpp
 
 gps.o: scr/gps.c include/gps.h

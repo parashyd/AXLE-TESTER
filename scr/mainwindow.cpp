@@ -84,6 +84,7 @@ MainWindow::MainWindow(QWidget *parent)
     startSocketServer();
 
     ReadMachNo();
+    Buzzerinit();
 
     int ret = GPS_Init();
     qDebug() << "GPS_Init =" << ret;
