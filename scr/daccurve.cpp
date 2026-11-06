@@ -736,6 +736,7 @@ void DacCurveDialog::updateGraphWithData()
     maxX = 0;
     maxY = 0;
     bool g1buzon=false;
+    bool DacBuzon = false;
 
 
     // Compute G1/G2 range windows
@@ -770,7 +771,22 @@ void DacCurveDialog::updateGraphWithData()
                 g1buzon=true;
             }
         }
-
+        if(val>0){
+                double DacPkIdx=xAxData[i]+(config.delay*DELAY_FACTOR);
+                int idx1=-1,idx2=-1;
+                if(DacPkBoundaries(&idx1, &idx2,DacPkIdx)==1){
+                    if (idx1 >= 0 && idx2 >= 0 &&
+                        idx1 < DACx.size() && idx2 < DACx.size() &&
+                        idx1 != idx2)
+                    {
+                        if(isPointAboveLine(DACx[idx1],DACy[idx1],
+                                             DACx[idx2],DACy[idx2],
+                                             DacPkIdx,val)){
+                            DacBuzon=true;
+                        }
+                    }
+                }
+        }
         maxX = qMax<double>(maxX, double(addr));
         maxY = qMax<double>(maxY, val);
     }
@@ -778,7 +794,7 @@ void DacCurveDialog::updateGraphWithData()
     if (xAxData.isEmpty()) return;
     ///qDebug() << "XdataSize"<< xData.size()<<"XnormSize"<< xNorm.size()<<"ydataSize" << yData.size();
     static int k =0;
-    if(g1buzon)
+    if(DacBuzon || g1buzon)
     {
         if(!isBuzzerOn()){
             BuzzerOn(true);
@@ -1362,36 +1378,122 @@ void DacCurveDialog::DrawDACCurve()
         }
     }
 
+    // qDebug() <<"xAxData:"<<xAxData.size() ;
+    // qDebug() <<"yAxData:"<<yAxData.size() ;
+    static int k=0;
+    if(k==10){
+        int max =0;
+        int DacPkIdx=0;
 
-    int max =0;
-    int DacPkIdx=0;
-    for(int i = static_cast<int>(DACx[0]-(config.delay*DELAY_FACTOR));i<static_cast<int>(DACx[DAC_CP]-(config.delay*DELAY_FACTOR));i++){
-        if(yAxData[i]>max){
-            max=yAxData[i];
-            DacPkIdx=i;
+        // qDebug() <<"i start value"<<(DACx[0]-(config.delay*DELAY_FACTOR)) ;
+        // qDebug() <<"i end value"<<(DACx[DAC_CP-2]-(config.delay*DELAY_FACTOR)) ;
+
+        for(int i = static_cast<int>(DACx[0]-(config.delay*DELAY_FACTOR));i<static_cast<int>(DACx[DAC_CP-2]-(config.delay*DELAY_FACTOR));i++){
+
+            if (i>xAxData.size()){
+                break;
+            }
+            if(yAxData[i]>max){
+                max=yAxData[i];
+                DacPkIdx=i;
+            }
+            max = qMax(max, static_cast<int>(yAxData[i]));
+
         }
+
+        ui->lineEdit_DacPH->setText(QString::number(max));
+        int BP =0;
+        if (DacPkIdx >= 0)
+            for (int i = DacPkIdx; i >= 0; i--)
+                if (yAxData[i] == 0) { BP = xAxNorm[i]; break; }
+
+        ui->lineEdit_DacBP->setText(QString::number(BP));
+        double ang = config.Angle * M_PI / 180.0;
+
+        double d1  = BP * cos(ang);
+        double sd1 = BP * sin(ang);
+        ui->lineEdit_2->setText(QString::number(d1));
+        ui->lineEdit_DacSD->setText(QString::number(sd1));
+
+        // DacPkIdx+=(config.delay*DELAY_FACTOR);
+        // int idx1,idx2;
+        // DacPkBoundaries(&idx1, &idx2,DacPkIdx);
+        // if(isPointAboveLine(DACx[idx1],DACy[idx1],
+        //                  DACx[idx2],DACy[idx2],
+        //                      DacPkIdx,max)){
+        //     if(!isBuzzerOn()){
+        //         BuzzerOn(true);
+        //         ui->lineEdit_ch->setStyleSheet(        "background-color: red;"
+        //                                        "border: 2px solid black;");
+        //     }
+        // }
+        // else{
+        //     if(isBuzzerOn()){
+        //         BuzzerOn(false);
+        //         ui->lineEdit_ch->setStyleSheet("");
+        //     }
+        // }
+
+
+    k=0;
     }
-    ui->lineEdit_DacPH->setText(QString::number(max));
-    int BP =0;
-    if (DacPkIdx >= 0)
-        for (int i = DacPkIdx; i >= 0; i--)
-            if (yAxData[i] == 0) { BP = xAxNorm[i]; break; }
-
-    ui->lineEdit_DacBP->setText(QString::number(BP));
-    double ang = config.Angle * M_PI / 180.0;
-
-    double d1  = BP * cos(ang);
-    double sd1 = BP * sin(ang);
-    ui->lineEdit_2->setText(QString::number(d1));
-    ui->lineEdit_DacSD->setText(QString::number(sd1));
-
+    k++;
 
     DACline->setData(xFiltered, yFiltered);
 
 
     //ui->Plot->replot();
 }
+int DacCurveDialog::DacPkBoundaries(int* idx1,int* idx2,int DacPkIdx){
+    if (!idx1 || !idx2)
+        return -1;
 
+    *idx1 = -1;
+    *idx2 = -1;
+
+    const int dacSize = qMin(DACx.size(), DACy.size());
+
+    // Count populated DAC points. DAC points are stored consecutively.
+    int pointCount = 0;
+    for (int i = 0; i < dacSize; ++i)
+    {
+        if (DACx[i] == 0.0 && DACy[i] == 0.0)
+            break;
+
+        ++pointCount;
+    }
+
+    if (pointCount < 2)
+        return -1;
+
+    // Find the adjacent pair containing DacPkIdx.
+    for (int i = 0; i < pointCount - 1; ++i)
+    {
+        if (DacPkIdx >= DACx[i] && DacPkIdx <= DACx[i + 1])
+        {
+            *idx1 = i;
+            *idx2 = i + 1;
+            return 1;
+        }
+    }
+
+    return -1;
+
+}
+bool DacCurveDialog::isPointAboveLine(
+    double x1, double y1,
+    double x2, double y2,
+    double x3, double y3)
+{
+    if (qFuzzyCompare(x1, x2))
+        return false;  // Vertical line: handle separately
+
+    double m = (y2 - y1) / (x2 - x1);
+
+    double expectedY = y1 + m * (x3 - x1);
+
+    return y3 > expectedY;
+}
 DacCurveDialog::~DacCurveDialog() { delete ui; }
 
 
