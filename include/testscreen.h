@@ -74,9 +74,6 @@ private slots:
     void adjustCurrentLineEdit(int delta);
     void updateGraphWithData();
     void onApplyGainClicked();
-    void CloseDAC();
-    void SaveDACPar();
-    void UserDACPoints();
     void DrawDACCurve();
     void handleRecording();
 
@@ -121,6 +118,13 @@ private slots:
     inline void focusGate2(int replotRequired);
     inline void plotGate1(int replotRequired, int ParamCalc);
     inline void plotGate2(int replotRequired, int ParamCalc);
+
+    int loadDACCurve();
+    int DacPkBoundaries(int* idx1,int* idx2,int DacPkIdx);
+    bool isPointAboveLine(
+        double x1, double y1,
+        double x2, double y2,
+        double x3, double y3);
 
 
 

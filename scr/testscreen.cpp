@@ -54,14 +54,14 @@ float RANGE_FACTOR, DELAY_FACTOR = 3.378, m_audioPercent = 0;
 //float RANGE_FACTOR_LT30 = 3.4;
 float RANGE_FACTOR_LT30 = 3.378;
 float RANGE_FACTOR_GT30 = 6.212;
-int peakIndex =-1,peakIndex1 = -1, peakIndex2 = -1,UserVelocity,userGainVal,SEC,CP=1;
+int peakIndex =-1,peakIndex1 = -1, peakIndex2 = -1,UserVelocity,userGainVal,SEC,DAC_CP=1;
 static int ModeCnt = 0,AudioLevel = 0,DACCnt = 0,CalGateCnt = 0,channelCnt=0;
 
 bool freeze;
 bool zoom = false;
 bool gate1_focus=false;
 bool gate2_focus=false;
-
+static volatile bool DAC_display =false;
 QString receivedChannel,receivedCalset;
 QMap<int, KeyPressState> keyStates;
 
@@ -1021,7 +1021,26 @@ void TestScreen::onSocketReadyRead(quint8 key)
         }
         break;
 
+    case ' ':
+        if(loadDACCurve()!=-1){
+            qDebug() << "event loadDACCurve != -1" ;
+            if(DAC_display){
+                DAC_display =false;
+            }else{
+                DAC_display =true;
+            }
+        }else{
+            qDebug() << "event loadDACCurve == -1" ;
 
+            ui->label_configStatus->setText("NO DAC curve found");
+
+            ui->label_configStatus->setStyleSheet(
+                "color: #ff0000;"
+                "font-size: 11px;"
+                "font-weight: bold;");
+            configStatusTimer->start(4000);
+        }
+        break;
     default:
         if (testdetails && testdetails->isVisible())
         {
@@ -1555,6 +1574,7 @@ void TestScreen::updateGraphWithData()
     maxY = 0;
     bool g1buzon=false;
     bool g2buzon=false;
+    bool DacBuzzer=false;
 
     // Normalize X values
     //QVector<double> xNorm;
@@ -1593,11 +1613,31 @@ void TestScreen::updateGraphWithData()
                 g1buzon=true;
             }
         }
-        if (xNorm[i] >= g2Start && xNorm[i] <= g2End)
-        {
-            if(yData[i]>config.th2)
+        if(DAC_display){
+            if(val>0){
+                double DacPkIdx=xData[i]+(config.delay*DELAY_FACTOR);
+                int idx1=-1,idx2=-1;
+                if(DacPkBoundaries(&idx1, &idx2,DacPkIdx)==1){
+                    if (idx1 >= 0 && idx2 >= 0 &&
+                        idx1 < DACx.size() && idx2 < DACx.size() &&
+                        idx1 != idx2)
+                    {
+                        if(isPointAboveLine(DACx[idx1],DACy[idx1],
+                                             DACx[idx2],DACy[idx2],
+                                             DacPkIdx,val)){
+                            DacBuzzer=true;
+                        }
+                    }
+                }
+            }
+
+        }else{
+            if (xNorm[i] >= g2Start && xNorm[i] <= g2End)
             {
-                g2buzon=true;
+                if(yData[i]>config.th2)
+                {
+                    g2buzon=true;
+                }
             }
         }
         maxX = qMax<double>(maxX, double(addr));
@@ -1607,7 +1647,7 @@ void TestScreen::updateGraphWithData()
     if (xData.isEmpty()) return;
     ///qDebug() << "XdataSize"<< xData.size()<<"XnormSize"<< xNorm.size()<<"ydataSize" << yData.size();
     static int k =0;
-    if(g1buzon || g2buzon)
+    if(g1buzon || g2buzon || DacBuzzer)
     {
         if(!isBuzzerOn()){
             BuzzerOn(true);
@@ -1622,8 +1662,15 @@ void TestScreen::updateGraphWithData()
         }
     }
 
+
     plotGate1(0,k);
-    plotGate2(0,k);//displaying ph values for every 10 iterations (10 * 20ms = 200ms)
+    DACline->data()->clear();
+
+    if(DAC_display){
+        DrawDACCurve();
+    }else{
+        plotGate2(0,k);
+        }//displaying ph values for every 10 iterations (10 * 20ms = 200ms)
     if(k==10)
     {
         k=0;
@@ -2254,25 +2301,6 @@ void TestScreen::adjustCurrentLineEdit(int delta)
     else if (focused == ui->lineEdit_G2ED)   adjustValue(config.g2_end,   3, 99,1); // int
     else if (focused == ui->lineEdit_TH2)    adjustValue(config.th2,      5, 99,1); // int
 
-    else if (focused == ui->lineEdit_CP)
-    {
-        if(delta==1)
-        {
-            SaveDACPar();
-            DrawDACCurve();
-        }
-        else if(delta == -1)
-        {
-            if(CP>=1 && CP<=10)
-            {
-                DACx[CP-1]=0;
-                DACy[CP-1]=0;
-                if(CP>1)CP=CP-1;
-                ui->lineEdit_CP->setText(QString::number(CP));
-                DrawDACCurve();
-            }
-        }
-    }
 
 }
 
@@ -2803,87 +2831,8 @@ bool TestScreen::eventFilter(QObject *obj, QEvent *event)
 
 
 
-void TestScreen::CloseDAC()
-{
-    ui->label_DAC->setVisible(false);
-    CP=1;
-}
 
 
-
-void TestScreen::SaveDACPar()
-{
-    // Acceptable CP values are 1..10 (inclusive). Convert to zero-based index safely.
-    const int minCP = 1;
-    const int maxCP = 10;
-    if (CP >= minCP && CP <= maxCP) {
-        int idx = CP - 1;  // 0..9
-        if (idx >= 0 && idx < DACx.size() && idx < DACy.size()) {
-            DACx[idx] = peakIndex1;
-            DACy[idx] = ph1Value;
-            // If you want to auto-increment CP for the next save, do it here,
-            // but be careful not to overflow:
-            if (CP < maxCP) ++CP;
-        } else {
-            qWarning() << "SaveDACPar: index out of range" << idx;
-        }
-    } else {
-        qWarning() << "SaveDACPar: CP out of allowed range:" << CP;
-    }
-    ui->lineEdit_CP->setText(QString::number(CP));
-}
-
-
-
-void TestScreen::UserDACPoints()
-{
-    int tmp_CP = ui->lineEdit_CP->text().toInt();
-    if (tmp_CP < 1 )
-    {
-        CP=1;
-        ui->lineEdit_CP->setText(QString::number(CP));
-    }
-    if (tmp_CP > 10 )
-    {
-        CP=10;
-        ui->lineEdit_CP->setText(QString::number(CP));
-    }
-}
-
-
-void TestScreen::DrawDACCurve()
-{
-    // ui->Plot->addGraph();
-    // ui->Plot->graph(3)->setData(DACx,DACy);
-    // ui->Plot->graph(3)->setLineStyle(QCPGraph::lsLine);
-    // ui->Plot->graph(3)->setPen(QPen(Qt::yellow, 2));
-
-        // Ensure DAC arrays exist and have the correct size.
-        // Example assumes they are QVector<double> DACx, DACy and size is dacArraySize (10).
-        const int dacArraySize = 10;
-        if (DACx.size() != dacArraySize || DACy.size() != dacArraySize)
-        {
-            qWarning() << "DrawDACCurve: DAC arrays have wrong size:" << DACx.size() << DACy.size();
-            return;
-        }
-
-        QVector<double> xFiltered;
-        QVector<double> yFiltered;
-
-        for (int i = 0; i < DACx.size(); ++i) {
-            if (DACy[i] != 0 ) {
-                xFiltered.append(DACx[i]);
-                yFiltered.append(DACy[i]);
-            }
-        }
-
-        DACline->data()->clear();
-        DACline->setData(xFiltered, yFiltered);
-        DACline->setLineStyle(QCPGraph::lsLine);
-        DACline->setPen(QPen(Qt::darkGreen, 2));
-
-        ui->Plot->replot();
-}
 void TestScreen::display_mc_no(void){
     // QFile file("BIN.BIN");
 
@@ -4153,6 +4102,233 @@ void TestScreen::applyTestScreenTheme()
             }
         )");
     }
+}
+
+int TestScreen::loadDACCurve()
+{
+    DACx = QVector<double>(10, 0.0);
+    DACy = QVector<double>(10, 0.0);
+    DAC_CP = 1;
+
+    const int channel = ui->lineEdit_ch->text().toInt();
+    const int calset = ui->lineEdit_calset->text().toInt();
+
+    if ((channel != 1 && channel != 2) || calset < 1 || calset > 50) {
+        qWarning() << "Invalid channel or calset:"
+                   << "Channel:" << channel
+                   << "Calset:" << calset;
+        return -1;
+    }
+
+    QFile file("dac_curves.json");
+
+    if (!file.exists()) {
+        qWarning() << "DAC JSON file does not exist!";
+        return -1;
+    }
+
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "Failed to open DAC JSON file:"
+                   << file.errorString();
+        return -1;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument doc =
+        QJsonDocument::fromJson(file.readAll(), &parseError);
+    file.close();
+
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "Invalid DAC JSON file:"
+                   << parseError.errorString();
+        return -1;
+    }
+
+    const QJsonObject root = doc.object();
+
+    const QString channelKey = QString("channel_%1").arg(channel);
+    const QString calsetKey = QString("calset_%1").arg(calset);
+
+    // Check channel existence
+    if (!root.contains(channelKey) || !root.value(channelKey).isObject()) {
+        qWarning() << "DAC channel not found in JSON:" << channelKey;
+        return -1;
+    }
+
+    const QJsonObject channelObject = root.value(channelKey).toObject();
+
+    // Check calset existence
+    if (!channelObject.contains(calsetKey) ||
+        !channelObject.value(calsetKey).isObject()) {
+        qWarning() << "DAC curve not found for"
+                   << channelKey << calsetKey;
+        return -1;
+    }
+
+    const QJsonObject curveObject = channelObject.value(calsetKey).toObject();
+
+    const QJsonArray xArray = curveObject.value("DACx").toArray();
+    const QJsonArray yArray = curveObject.value("DACy").toArray();
+
+    const int count = qMin(10, qMin(xArray.size(), yArray.size()));
+
+    for (int i = 0; i < count; ++i) {
+        DACx[i] = xArray.at(i).toDouble();
+        DACy[i] = yArray.at(i).toDouble();
+    }
+
+    int firstUnused = 0;
+
+    while (firstUnused < 10 &&
+           (DACx[firstUnused] != 0.0 || DACy[firstUnused] != 0.0)) {
+        ++firstUnused;
+    }
+
+    DAC_CP = qMin(firstUnused + 1, 10);
+}
+void TestScreen::DrawDACCurve()
+{
+    // ui->Plot->addGraph();
+    // ui->Plot->graph(3)->setData(DACx,DACy);
+    // ui->Plot->graph(3)->setLineStyle(QCPGraph::lsLine);
+    // ui->Plot->graph(3)->setPen(QPen(Qt::yellow, 2));
+
+    // Ensure DAC arrays exist and have the correct size.
+    // Example assumes they are QVector<double> DACx, DACy and size is dacArraySize (10).
+    const int dacArraySize = 10;
+    // if (DACx.size() != dacArraySize || DACy.size() != dacArraySize)
+    // {
+    //     qWarning() << "DrawDACCurve: DAC arrays have wrong size:" << DACx.size() << DACy.size();
+    //     return;
+    // }
+
+    QVector<double> xFiltered;
+    QVector<double> yFiltered;
+
+    for (int i = 0; i < DACx.size(); ++i) {
+        if (DACy[i] != 0 ) {
+            double x = DACx[i]-(config.delay*DELAY_FACTOR);
+            config.Angle<=30 ? x=(x / RANGE_FACTOR_LT30) :  x=(x/ RANGE_FACTOR_GT30);
+            xFiltered.append(x);
+            yFiltered.append(DACy[i]);
+        }
+    }
+
+    // qDebug() <<"xAxData:"<<xAxData.size() ;
+    // qDebug() <<"yAxData:"<<yAxData.size() ;
+    static int k = 0;
+
+    if (k == 10)
+    {
+        int max = 0;
+        int DacPkIdx = 0;
+
+        // At least two valid DAC points are required.
+        if (DAC_CP >= 3 &&
+            DAC_CP <= DACx.size() &&
+            DACx.size() == DACy.size())
+        {
+            int startIdx = static_cast<int>(
+                DACx[0] - (config.delay * DELAY_FACTOR));
+
+            int endIdx = static_cast<int>(
+                DACx[DAC_CP - 2] - (config.delay * DELAY_FACTOR));
+
+            // Clamp the indices to valid waveform boundaries.
+            startIdx = qMax(0, startIdx);
+            endIdx = qMin(endIdx, yData.size() - 1);
+            endIdx = qMin(endIdx, xNorm.size() - 1);
+
+            for (int i = startIdx; i < endIdx; i++)
+            {
+                if (yData[i] > max)
+                {
+                    max = static_cast<int>(yData[i]);
+                    DacPkIdx = i;
+                }
+            }
+
+            int BP = 0;
+
+            for (int i = DacPkIdx; i >= 0 && i < xNorm.size(); i--)
+            {
+                if (yData[i] == 0)
+                {
+                    BP = static_cast<int>(xNorm[i]);
+                    break;
+                }
+            }
+
+            ui->lineEdit_PH2->setText(QString::number(max));
+            ui->lineEdit_BP2->setText(QString::number(BP));
+
+            double ang = config.Angle * M_PI / 180.0;
+
+            double d1 = BP * cos(ang);
+            double sd1 = BP * sin(ang);
+
+            ui->lineEdit_D2->setText(QString::number(d1));
+            ui->lineEdit_SD2->setText(QString::number(sd1));
+        }
+
+        k = 0;
+    }
+        k++;
+
+    DACline->setData(xFiltered, yFiltered);
+
+
+    //ui->Plot->replot();
+}
+int TestScreen::DacPkBoundaries(int* idx1,int* idx2,int DacPkIdx){
+    if (!idx1 || !idx2)
+        return -1;
+
+    *idx1 = -1;
+    *idx2 = -1;
+
+    const int dacSize = qMin(DACx.size(), DACy.size());
+
+    // Count populated DAC points. DAC points are stored consecutively.
+    int pointCount = 0;
+    for (int i = 0; i < dacSize; ++i)
+    {
+        if (DACx[i] == 0.0 && DACy[i] == 0.0)
+            break;
+
+        ++pointCount;
+    }
+
+    if (pointCount < 2)
+        return -1;
+
+    // Find the adjacent pair containing DacPkIdx.
+    for (int i = 0; i < pointCount - 1; ++i)
+    {
+        if (DacPkIdx >= DACx[i] && DacPkIdx <= DACx[i + 1])
+        {
+            *idx1 = i;
+            *idx2 = i + 1;
+            return 1;
+        }
+    }
+
+    return -1;
+
+}
+bool TestScreen::isPointAboveLine(
+    double x1, double y1,
+    double x2, double y2,
+    double x3, double y3)
+{
+    if (qFuzzyCompare(x1, x2))
+        return false;  // Vertical line: handle separately
+
+    double m = (y2 - y1) / (x2 - x1);
+
+    double expectedY = y1 + m * (x3 - x1);
+
+    return y3 > expectedY;
 }
 TestScreen::~TestScreen()
 {
