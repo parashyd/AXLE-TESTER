@@ -4106,6 +4106,8 @@ void TestScreen::applyTestScreenTheme()
 
 int TestScreen::loadDACCurve()
 {
+    qDebug() << "event loadDac iniital " ;
+
     DACx = QVector<double>(10, 0.0);
     DACy = QVector<double>(10, 0.0);
     DAC_CP = 1;
