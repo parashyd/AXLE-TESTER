@@ -1615,20 +1615,20 @@ void TestScreen::updateGraphWithData()
         }
         if(DAC_display){
             if(val>0){
-                double DacPkIdx=xData[i]+(config.delay*DELAY_FACTOR);
-                int idx1=-1,idx2=-1;
-                if(DacPkBoundaries(&idx1, &idx2,DacPkIdx)==1){
-                    if (idx1 >= 0 && idx2 >= 0 &&
-                        idx1 < DACx.size() && idx2 < DACx.size() &&
-                        idx1 != idx2)
-                    {
-                        if(isPointAboveLine(DACx[idx1],DACy[idx1],
-                                             DACx[idx2],DACy[idx2],
-                                             DacPkIdx,val)){
-                            DacBuzzer=true;
+                    double DacPkIdx=xData[i]+(config.delay*DELAY_FACTOR);
+                    int idx1=-1,idx2=-1;
+                    if(DacPkBoundaries(&idx1, &idx2,DacPkIdx)==1){
+                        if (idx1 >= 0 && idx2 >= 0 &&
+                            idx1 < DACx.size() && idx2 < DACx.size() &&
+                            idx1 != idx2)
+                        {
+                            if(isPointAboveLine(DACx[idx1],DACy[idx1],
+                                                 DACx[idx2],DACy[idx2],
+                                                 DacPkIdx,val)){
+                                DacBuzzer=true;
+                            }
                         }
                     }
-                }
             }
 
         }else{
@@ -1665,6 +1665,7 @@ void TestScreen::updateGraphWithData()
 
     plotGate1(0,k);
     DACline->data()->clear();
+    g2Line->data()->clear();
 
     if(DAC_display){
         DrawDACCurve();
@@ -1831,7 +1832,6 @@ inline void TestScreen::plotGate2(int replotRequired,int ParamCalc)
     if(gate2_focus){
         focusGate2(0);
     }
-    g2Line->data()->clear();
     g2Line->setData(QVector<double>{g2Start, g2End},
                     QVector<double>{(double)config.th2, (double)config.th2});
     if (replotRequired)
@@ -4108,8 +4108,11 @@ int TestScreen::loadDACCurve()
 {
     qDebug() << "event loadDac iniital " ;
 
-    DACx = QVector<double>(10, 0.0);
-    DACy = QVector<double>(10, 0.0);
+    // DACx = QVector<double>(10, 0.0);
+    // DACy = QVector<double>(10, 0.0);
+    DACx.resize(10);
+    DACy.resize(10);
+
     DAC_CP = 1;
 
     const int channel = ui->lineEdit_ch->text().toInt();
@@ -4183,10 +4186,11 @@ int TestScreen::loadDACCurve()
 
     while (firstUnused < 10 &&
            (DACx[firstUnused] != 0.0 || DACy[firstUnused] != 0.0)) {
-        ++firstUnused;
+        firstUnused+=1;
     }
 
-    DAC_CP = qMin(firstUnused + 1, 10);
+    DAC_CP = qMin(firstUnused+1, 10);
+    return 1;
 }
 void TestScreen::DrawDACCurve()
 {
@@ -4234,7 +4238,7 @@ void TestScreen::DrawDACCurve()
                 DACx[0] - (config.delay * DELAY_FACTOR));
 
             int endIdx = static_cast<int>(
-                DACx[DAC_CP - 2] - (config.delay * DELAY_FACTOR));
+                DACx[DAC_CP - 1] - (config.delay * DELAY_FACTOR));
 
             // Clamp the indices to valid waveform boundaries.
             startIdx = qMax(0, startIdx);
