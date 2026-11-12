@@ -205,7 +205,6 @@ TestScreen::TestScreen(QWidget *parent)
     loadSavedConfig();
     UserVelocity = Postlog.velocity;
 
-    ui->lineEdit_Mode->setText("SC");
     ui->label_DAC->setVisible(false);
     ui->lineEdit_CP->setVisible(false);
     ui->label_offset->setVisible(false);
@@ -655,7 +654,29 @@ void TestScreen::onSocketReadyRead(quint8 key)
             config.channel = 1;
             autoRunConfig();
             onApplyGainClicked();
+            ui->lineEdit_Mode->setText("DC");
+            DC_SC_mode="DC";
+            if(DAC_display){
+                if(loadDACCurve()!=-1){
+                    qDebug() << "event loadDACCurve != -1" ;
+                    ui->label_configStatus->setText("");
 
+                }else{
+                    qDebug() << "event loadDACCurve == -1" ;
+
+                    ui->label_configStatus->setText("NO DAC curve found");
+
+                    ui->label_configStatus->setStyleSheet(
+                        "color: #ff0000;"
+                        "font-size: 11px;"
+                        "font-weight: bold;");
+                    configStatusTimer->start(4000);
+                    DAC_display=false;
+                }
+            }
+            else{
+                ui->label_configStatus->setText("");
+            }
         }
         else if(channelCnt == 2){
             receivedChannel = "2";
@@ -664,6 +685,30 @@ void TestScreen::onSocketReadyRead(quint8 key)
             config.channel = 2;
             autoRunConfig();
             onApplyGainClicked();
+            ui->lineEdit_Mode->setText("SC");
+            DC_SC_mode="SC";
+            if(DAC_display){
+                if(loadDACCurve()!=-1){
+                    qDebug() << "event loadDACCurve != -1" ;
+                    ui->label_configStatus->setText("");
+
+                }else{
+                    qDebug() << "event loadDACCurve == -1" ;
+
+                    ui->label_configStatus->setText("NO DAC curve found");
+
+                    ui->label_configStatus->setStyleSheet(
+                        "color: #ff0000;"
+                        "font-size: 11px;"
+                        "font-weight: bold;");
+                    configStatusTimer->start(4000);
+                    DAC_display=false;
+                }
+            }
+            else{
+                ui->label_configStatus->setText("");
+
+            }
 
             channelCnt=0;
         }
@@ -705,6 +750,28 @@ void TestScreen::onSocketReadyRead(quint8 key)
         qDebug() <<"calset Active";
         prepareCalsetInput();
         onApplyGainClicked();
+
+        if(DAC_display){
+            if(loadDACCurve()!=-1){
+                qDebug() << "event loadDACCurve != -1" ;
+                ui->label_configStatus->setText("");
+            }else{
+                qDebug() << "event loadDACCurve == -1" ;
+
+                ui->label_configStatus->setText("NO DAC curve found");
+
+                ui->label_configStatus->setStyleSheet(
+                    "color: #ff0000;"
+                    "font-size: 11px;"
+                    "font-weight: bold;");
+                configStatusTimer->start(4000);
+                DAC_display=false;
+            }
+        }
+        else{
+            ui->label_configStatus->setText("");
+
+        }
         break;
 
     case GATE:
@@ -757,11 +824,14 @@ void TestScreen::onSocketReadyRead(quint8 key)
             }
 
             gate1_focus=false;
-            gate2_focus=true;
-            ui->lineEdit_calset->setStyleSheet("");
+            if(!DAC_display){
+                gate2_focus=true;
+                ui->lineEdit_calset->setStyleSheet("");
+                g2border->setVisible(true);
+                focusGate2(1);
+            }
             g1border->setVisible(false);
-            g2border->setVisible(true);
-            focusGate2(1);
+
         }
         else if(CalGateCnt == 3)
         {
@@ -2223,6 +2293,27 @@ void TestScreen::handleDigitInput(int digit)
     {
         config.calset   = value;
         ui->lineEdit_calset->setText(QString::number(value, 'd', 0));
+        if(DAC_display){
+            if(loadDACCurve()!=-1){
+                qDebug() << "event loadDACCurve != -1" ;
+                ui->label_configStatus->setText("");
+            }else{
+                qDebug() << "event loadDACCurve == -1" ;
+
+                ui->label_configStatus->setText("NO DAC curve found");
+
+                ui->label_configStatus->setStyleSheet(
+                    "color: #ff0000;"
+                    "font-size: 11px;"
+                    "font-weight: bold;");
+                configStatusTimer->start(4000);
+                DAC_display=false;
+            }
+        }
+        else{
+            ui->label_configStatus->setText("");
+
+        }
 
     }
     else if (focused == ui->lineEdit_Velocity)
@@ -2635,6 +2726,13 @@ void TestScreen::loadSavedConfig()
 
     // Update any internal fields or UI if necessary
     ui->lineEdit_ch->setText(QString::number(Postlog.channel));
+    if(Postlog.channel == 1){
+        ui->lineEdit_Mode->setText("DC");
+        DC_SC_mode="DC";
+    }else{
+        ui->lineEdit_Mode->setText("SC");
+            DC_SC_mode="SC"  ;
+    }
     ui->lineEdit_calset->setText(QString::number(Postlog.calset));
     ui->lineEdit_Velocity ->setText(QString::number(Postlog.velocity));
 }
@@ -4108,10 +4206,10 @@ int TestScreen::loadDACCurve()
 {
     qDebug() << "event loadDac iniital " ;
 
-    // DACx = QVector<double>(10, 0.0);
-    // DACy = QVector<double>(10, 0.0);
-    DACx.resize(10);
-    DACy.resize(10);
+    DACx = QVector<double>(10, 0.0);
+    DACy = QVector<double>(10, 0.0);
+    // DACx.resize(10);
+    // DACy.resize(10);
 
     DAC_CP = 1;
 
@@ -4224,7 +4322,7 @@ void TestScreen::DrawDACCurve()
     // qDebug() <<"yAxData:"<<yAxData.size() ;
     static int k = 0;
 
-    if (k == 10)
+    if (k == 8)
     {
         int max = 0;
         int DacPkIdx = 0;
@@ -4238,7 +4336,7 @@ void TestScreen::DrawDACCurve()
                 DACx[0] - (config.delay * DELAY_FACTOR));
 
             int endIdx = static_cast<int>(
-                DACx[DAC_CP - 1] - (config.delay * DELAY_FACTOR));
+                DACx[DAC_CP - 2] - (config.delay * DELAY_FACTOR));
 
             // Clamp the indices to valid waveform boundaries.
             startIdx = qMax(0, startIdx);

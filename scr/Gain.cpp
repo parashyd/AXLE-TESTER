@@ -59,7 +59,7 @@ void OperateGainDual(int gain_ch1, int gain_ch2)
     usleep(1);
     gpio_Write(Write_Enable[0], 1);
 
-    usleep(5); // small separation
+    usleep(3); // small separation
 
     // ---- CH2 ----
     if (gain_ch2 < 0)   gain_ch2 = 0;

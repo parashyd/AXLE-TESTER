@@ -226,8 +226,17 @@ TestDetails::TestDetails(QWidget *parent)
     testdetails->lineEdit_CH->setText(QString::number(config.channel));
     testdetails->lineEdit_Calset->setText(QString::number(config.calset));
 
-    testdetails->comboBox_Probe->setCurrentIndex(config.Angle);                  // Angle (correction)
-    testdetails->comboBox_Mode->setCurrentText(DC_SC_mode);
+    testdetails->comboBox_Probe->setCurrentIndex(config.Angle);    // Angle (correction)
+    const int modeIndex = testdetails->comboBox_Mode->findText(
+        DC_SC_mode,
+        Qt::MatchFixedString | Qt::MatchCaseSensitive);
+
+    if (modeIndex >= 0)
+        testdetails->comboBox_Mode->setCurrentIndex(modeIndex);
+    else
+        qWarning() << "Unknown position in Config.txt:" << DC_SC_mode;
+
+    // testdetails->comboBox_Mode->setCurrentText(DC_SC_mode);
     testdetails->lineEdit_Km->setText(km);
     testdetails->lineEdit_Mtr->setText(M);
     testdetails->comboBox_Rail->setCurrentText(Rail);
