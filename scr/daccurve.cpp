@@ -210,12 +210,14 @@ void DacCurveDialog::handleSocketKey(int key){
             adjustCurrentLineEdit(-1);
         }
         break;
+
     case CALSET:
         setLogicalFocus(ui->lineEdit_calset);
         // 🔹 Enable the widget
         ui->lineEdit_calset->setEnabled(true);
         autoRunConfig();
         onApplyGainClicked();
+        break;
 
     case GATE:
         GateCnt+=1;
