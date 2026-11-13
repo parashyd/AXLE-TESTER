@@ -165,6 +165,11 @@ private:
     QWidget* m_currentLogicalFocus = nullptr;  // currently highlighted widget
 
     QStackedWidget *stackedWidget;
+    QVector<float> gain_offsetArr;
+    QVector<int> range_offsetArr,delay_offsetArr,reject_offsetArr;
+
+
+    int gain_Offset_i,range_Offset_i,delay_Offset_i,reject_Offset_i;
 
 signals :
     void closeTestScreen();

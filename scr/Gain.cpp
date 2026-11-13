@@ -42,7 +42,7 @@ void OperateGainDual(int gain_ch1, int gain_ch2)
 {
     // gain_init();                        //Initilize GPIO's
     int bit;
-
+    if(gain_ch1!=-1){
     // ---- CH1 ----
     if (gain_ch1 < 0)   gain_ch1 = 0;
     if (gain_ch1 > 255) gain_ch1 = 255;
@@ -58,9 +58,10 @@ void OperateGainDual(int gain_ch1, int gain_ch2)
     gpio_Write(Write_Enable[0], 0);
     usleep(1);
     gpio_Write(Write_Enable[0], 1);
+    }
+   // usleep(3); // small separation
 
-    usleep(3); // small separation
-
+    else if(gain_ch2!=-1){
     // ---- CH2 ----
     if (gain_ch2 < 0)   gain_ch2 = 0;
     if (gain_ch2 > 255) gain_ch2 = 255;
@@ -76,7 +77,7 @@ void OperateGainDual(int gain_ch1, int gain_ch2)
     gpio_Write(Write_Enable[0], 0);
     usleep(1);
     gpio_Write(Write_Enable[0], 1);
-
+    }
     printf("Loaded gains: CH1=%d, CH2=%d\n", gain_ch1, gain_ch2);
 }
 void delay_loop_1ms()

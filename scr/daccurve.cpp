@@ -32,6 +32,8 @@ short int channelCnt=0, GateCnt=0;
 static int AudioLevel =0;
 static QVector<double> DACx, DACy;
 static int DAC_CP=1;
+
+
 DacCurveDialog::DacCurveDialog(QWidget *parent)
     : QDialog(parent), ui(new Ui::DacCurveDialog), m_plotWidget(nullptr)
 {
@@ -49,6 +51,16 @@ DacCurveDialog::DacCurveDialog(QWidget *parent)
 
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint);
     resize(640, 480);
+
+    gain_offsetArr={0.5,1,2,3,6,10};
+    range_offsetArr={1,2,5,10,50,100};
+    delay_offsetArr={1,2,5,10,50,100};
+    reject_offsetArr={1,2,5,10,20,30};
+
+    gain_Offset_i=0;
+    range_Offset_i=0;
+    delay_Offset_i=0;
+    reject_Offset_i=0;
 
     DACx.resize(10);
     DACy.resize(10);
@@ -101,6 +113,7 @@ DacCurveDialog::DacCurveDialog(QWidget *parent)
     ui->lineEdit_DacBP->setVisible(false);
     ui->lineEdit_2->setVisible(false);
     ui->lineEdit_DacSD->setVisible(false);
+    ui->label_offset->setVisible(false);
 
     inputStates[ui->lineEdit_calset] = KeyPressState();
     inputStates[ui->lineEdit]        = KeyPressState();
@@ -148,11 +161,16 @@ void DacCurveDialog::handleSocketKey(int key){
         if(gate1_focus){
             HandleGateShift(+1);
         }
+        else{
+            FunctionLeftRight(true);
+        }
         break;
 
     case LEFT:
         if(gate1_focus){
             HandleGateShift(-1);
+        }else{
+            FunctionLeftRight(false);
         }
         break;
     case CHANNEL:
@@ -178,15 +196,26 @@ void DacCurveDialog::handleSocketKey(int key){
         break;
 
     case INC:
-        SaveDACPar();
-        // if (DAC_CP>3){
-        //     DrawDACCurve();
-        // }
+        if(gate1_focus){
+            SaveDACPar();
+        }else{
+            adjustCurrentLineEdit(+1);
+        }
         break;
 
     case DEC:
-        removeLastDACPoint();
+        if(gate1_focus){
+            removeLastDACPoint();
+        }else{
+            adjustCurrentLineEdit(-1);
+        }
         break;
+    case CALSET:
+        setLogicalFocus(ui->lineEdit_calset);
+        // 🔹 Enable the widget
+        ui->lineEdit_calset->setEnabled(true);
+        autoRunConfig();
+        onApplyGainClicked();
 
     case GATE:
         GateCnt+=1;
@@ -211,6 +240,7 @@ void DacCurveDialog::handleSocketKey(int key){
 
             gate1_focus=true;
             g1border->setVisible(true);
+            ui->label_offset->setVisible(false);
             //g2border->setVisible(false);
             focusGate1(1);
         }
@@ -569,6 +599,63 @@ void DacCurveDialog::autoRunConfig()
     ui->Plot->xAxis->setRange(0, config.range);  // optional
     ui->Plot->yAxis->setRange(0, 100);
     qDebug() << "autorunconfig completed" ;
+
+}
+void DacCurveDialog::adjustCurrentLineEdit(int delta)
+{
+    QLineEdit* focused = qobject_cast<QLineEdit*>(this->focusWidget());
+    // if (!focused || !focused->isEnabled())
+    //     return;
+
+
+    auto adjustValue = [&](auto& field, int minVal, int maxVal,float off) {
+        using T = std::decay_t<decltype(field)>;
+        T current = static_cast<T>(focused->text().toDouble());
+        T newValue = qBound(static_cast<T>(minVal), current + static_cast<T>(delta * off), static_cast<T>(maxVal));
+        field = newValue;
+        if(focused==ui->lineEdit_Gain)
+            focused->setText(QString::number(newValue, 'f', std::is_floating_point<T>::value ? 1 : 0));
+        else
+            focused->setText(QString::number(newValue, 'd',0));
+    };
+
+    // if(gate1_focus){
+    //     focused = ui->lineEdit_G1ED;
+    //     if(config.g1_start==config.g1_end && delta ==-1){
+    //         return;
+    //     }
+    //     if(config.g1_start<=config.g1_end){
+    //         adjustValue(config.g1_end, 3, 99,1);
+    //         plotGate1(1,10);}
+    //     return;
+    // }
+    // else if(gate2_focus){
+    //     focused=ui->lineEdit_G2ED;
+    //     if(config.g2_start==config.g2_end && delta ==-1){
+    //         return;
+    //     }
+    //     if(config.g2_start<=config.g2_end){
+    //         adjustValue(config.g2_end, 3, 99,1);
+    //         plotGate2(1,10);
+    //     }
+    //     return;
+    // }
+
+    if (focused == ui->lineEdit_Gain)
+    {       adjustValue(config.Gain,   0, 80, gain_offsetArr[gain_Offset_i]) ;
+        onApplyGainClicked();
+    }
+    else if (focused == ui->lineEdit_Range)  {adjustValue(config.range,  50, 1000, range_offsetArr[range_Offset_i]);} // assume range is double
+    else if (focused == ui->lineEdit_Delay)  adjustValue(config.delay,  0, 200, delay_offsetArr[delay_Offset_i]); // float or int
+    else if (focused == ui->lineEdit_Reject) adjustValue(config.reject, 0, 99, reject_offsetArr[reject_Offset_i]);  // float or int
+    else if (focused == ui->lineEdit_Angle)  adjustValue(config.Angle,  0, 90,1);  // float
+    else if (focused == ui->lineEdit_G1ST)   adjustValue(config.g1_start, 3, 99,1); // int
+    else if (focused == ui->lineEdit_G1ED)   adjustValue(config.g1_end,   3, 99,1); // int
+    else if (focused == ui->lineEdit_TH1)    adjustValue(config.th1,      5, 99,1); // int
+    else if (focused == ui->lineEdit_G2ST)   adjustValue(config.g2_start, 3, 99,1); // int
+    else if (focused == ui->lineEdit_G2ED)   adjustValue(config.g2_end,   3, 99,1); // int
+    else if (focused == ui->lineEdit_TH2)    adjustValue(config.th2,      5, 99,1); // int
+
 
 }
 
@@ -954,6 +1041,8 @@ void DacCurveDialog::navigateFocusVertical(int direction)
     if (!current || !navWidgets.contains(current)){
         current = ui->lineEdit_Gain;
         setLogicalFocus(current);
+        ui->label_offset->setVisible(true);
+        ui->label_offset->setText("offset : " + QString::number(gain_offsetArr[gain_Offset_i],'f',1 ));
         return;
     }
 
@@ -967,7 +1056,24 @@ void DacCurveDialog::navigateFocusVertical(int direction)
         newIndex = 0;
 
     QWidget *newWidget = navWidgets[newIndex];
-
+    if(newWidget == ui->lineEdit_Angle ||
+        newWidget == ui->lineEdit_G1ST ||
+        newWidget == ui->lineEdit_G1ED ||
+        newWidget == ui->lineEdit_TH1 ||
+        newWidget == ui->lineEdit_G2ST ||
+        newWidget == ui->lineEdit_G2ED ||
+        newWidget == ui->lineEdit_TH2
+        )
+    {
+        ui->label_offset->setVisible(false);
+    }
+    else{
+        ui->label_offset->setVisible(true);
+    }
+    if(newWidget == ui->lineEdit_Gain) ui->label_offset->setText("offset : "+QString::number(gain_offsetArr[gain_Offset_i],'f',0));
+    else if(newWidget == ui->lineEdit_Range) ui->label_offset->setText("offset : "+QString::number(range_offsetArr[range_Offset_i]));
+    else if(newWidget == ui->lineEdit_Delay) ui->label_offset->setText("offset : "+QString::number(delay_offsetArr[delay_Offset_i]));
+    else if(newWidget == ui->lineEdit_Reject) ui->label_offset->setText("offset : "+QString::number(reject_offsetArr[reject_Offset_i]));
 
     setLogicalFocus(newWidget);
 
@@ -1175,56 +1281,145 @@ QString DacCurveDialog::dacCurveFilePath() const
     return QDir::current().filePath("dac_curves.json");
 }
 
-void DacCurveDialog::loadDACCurve()
+// void DacCurveDialog::loadDACCurve()
+// {
+//     DACx = QVector<double>(10, 0.0);
+//     DACy = QVector<double>(10, 0.0);
+//     DAC_CP = 1;
+
+//     const int channel = ui->lineEdit_ch->text().toInt();
+//     const int calset = ui->lineEdit_calset->text().toInt();
+
+//     if ((channel != 1 && channel != 2) || calset < 1 || calset > 50) {
+//         updateDACCurveDisplay();
+//         return;
+//     }
+
+//     QFile file(dacCurveFilePath());
+//     if (file.exists() && file.open(QIODevice::ReadOnly)) {
+//         QJsonParseError parseError;
+//         const QJsonDocument doc =
+//             QJsonDocument::fromJson(file.readAll(), &parseError);
+//         file.close();
+
+//         if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
+//             const QJsonObject root = doc.object();
+//             const QString channelKey = QString("channel_%1").arg(channel);
+//             const QString calsetKey = QString("calset_%1").arg(calset);
+//             const QJsonObject channelObject = root.value(channelKey).toObject();
+//             const QJsonObject curveObject = channelObject.value(calsetKey).toObject();
+//             const QJsonArray xArray = curveObject.value("DACx").toArray();
+//             const QJsonArray yArray = curveObject.value("DACy").toArray();
+
+//             const int count = qMin(10, qMin(xArray.size(), yArray.size()));
+//             for (int i = 0; i < count; ++i) {
+//                 DACx[i] = xArray.at(i).toDouble();
+//                 DACy[i] = yArray.at(i).toDouble();
+//             }
+//         } else {
+//             qWarning() << "Invalid DAC JSON file:" << parseError.errorString();
+//         }
+//     }
+
+//     int firstUnused = 0;
+//     while (firstUnused < 10 &&
+//            (DACx[firstUnused] != 0.0 || DACy[firstUnused] != 0.0))
+//         ++firstUnused;
+
+//     DAC_CP = qMin(firstUnused + 1, 10);
+//     ui->lineEdit_CP->setText(QString::number(DAC_CP));
+//     updateDACCurveDisplay();
+// }
+int DacCurveDialog::loadDACCurve()
 {
+    qDebug() << "event loadDac iniital " ;
+
     DACx = QVector<double>(10, 0.0);
     DACy = QVector<double>(10, 0.0);
+    // DACx.resize(10);
+    // DACy.resize(10);
+
     DAC_CP = 1;
 
     const int channel = ui->lineEdit_ch->text().toInt();
     const int calset = ui->lineEdit_calset->text().toInt();
 
     if ((channel != 1 && channel != 2) || calset < 1 || calset > 50) {
-        updateDACCurveDisplay();
-        return;
+        qWarning() << "Invalid channel or calset:"
+                   << "Channel:" << channel
+                   << "Calset:" << calset;
+        return -1;
     }
 
-    QFile file(dacCurveFilePath());
-    if (file.exists() && file.open(QIODevice::ReadOnly)) {
-        QJsonParseError parseError;
-        const QJsonDocument doc =
-            QJsonDocument::fromJson(file.readAll(), &parseError);
-        file.close();
+    QFile file("dac_curves.json");
 
-        if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
-            const QJsonObject root = doc.object();
-            const QString channelKey = QString("channel_%1").arg(channel);
-            const QString calsetKey = QString("calset_%1").arg(calset);
-            const QJsonObject channelObject = root.value(channelKey).toObject();
-            const QJsonObject curveObject = channelObject.value(calsetKey).toObject();
-            const QJsonArray xArray = curveObject.value("DACx").toArray();
-            const QJsonArray yArray = curveObject.value("DACy").toArray();
+    if (!file.exists()) {
+        qWarning() << "DAC JSON file does not exist!";
+        return -1;
+    }
 
-            const int count = qMin(10, qMin(xArray.size(), yArray.size()));
-            for (int i = 0; i < count; ++i) {
-                DACx[i] = xArray.at(i).toDouble();
-                DACy[i] = yArray.at(i).toDouble();
-            }
-        } else {
-            qWarning() << "Invalid DAC JSON file:" << parseError.errorString();
-        }
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "Failed to open DAC JSON file:"
+                   << file.errorString();
+        return -1;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument doc =
+        QJsonDocument::fromJson(file.readAll(), &parseError);
+    file.close();
+
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "Invalid DAC JSON file:"
+                   << parseError.errorString();
+        return -1;
+    }
+
+    const QJsonObject root = doc.object();
+
+    const QString channelKey = QString("channel_%1").arg(channel);
+    const QString calsetKey = QString("calset_%1").arg(calset);
+
+    // Check channel existence
+    if (!root.contains(channelKey) || !root.value(channelKey).isObject()) {
+        qWarning() << "DAC channel not found in JSON:" << channelKey;
+        return -1;
+    }
+
+    const QJsonObject channelObject = root.value(channelKey).toObject();
+
+    // Check calset existence
+    if (!channelObject.contains(calsetKey) ||
+        !channelObject.value(calsetKey).isObject()) {
+        qWarning() << "DAC curve not found for"
+                   << channelKey << calsetKey;
+        return -1;
+    }
+
+    const QJsonObject curveObject = channelObject.value(calsetKey).toObject();
+
+    const QJsonArray xArray = curveObject.value("DACx").toArray();
+    const QJsonArray yArray = curveObject.value("DACy").toArray();
+
+    const int count = qMin(10, qMin(xArray.size(), yArray.size()));
+
+    for (int i = 0; i < count; ++i) {
+        DACx[i] = xArray.at(i).toDouble();
+        DACy[i] = yArray.at(i).toDouble();
     }
 
     int firstUnused = 0;
-    while (firstUnused < 10 &&
-           (DACx[firstUnused] != 0.0 || DACy[firstUnused] != 0.0))
-        ++firstUnused;
 
-    DAC_CP = qMin(firstUnused + 1, 10);
+    while (firstUnused < 10 &&
+           (DACx[firstUnused] != 0.0 || DACy[firstUnused] != 0.0)) {
+        firstUnused+=1;
+    }
+
+    DAC_CP = qMin(firstUnused+1, 10);
     ui->lineEdit_CP->setText(QString::number(DAC_CP));
     updateDACCurveDisplay();
+    return 1;
 }
-
 void DacCurveDialog::saveDACCurve()
 {
     const int channel = ui->lineEdit_ch->text().toInt();
@@ -1493,6 +1688,123 @@ bool DacCurveDialog::isPointAboveLine(
     double expectedY = y1 + m * (x3 - x1);
 
     return y3 > expectedY;
+}
+void DacCurveDialog::FunctionLeftRight(bool increment)
+{
+    QLineEdit* focused = qobject_cast<QLineEdit*>(focusWidget());
+
+    if(focused == ui->lineEdit_Gain)
+    {
+        if(increment){
+            if((gain_Offset_i+1)<gain_offsetArr.size()){
+                gain_Offset_i++;
+                ui->label_offset->setText("offset : " + QString::number(gain_offsetArr[gain_Offset_i],'f',1));
+                return;
+            }
+            else if((gain_Offset_i+1)==gain_offsetArr.size() ){
+                gain_Offset_i = 0;
+                ui->label_offset->setText("offset : " + QString::number(gain_offsetArr[gain_Offset_i],'f',1));
+                return;
+            }
+        }
+        else{
+            if((gain_Offset_i-1)>=0){
+                gain_Offset_i--;
+                ui->label_offset->setText("offset : " + QString::number(gain_offsetArr[gain_Offset_i],'f',1));
+                return;
+            }
+            else if((gain_Offset_i-1)<0)
+            {
+                gain_Offset_i = gain_offsetArr.size()-1;
+                ui->label_offset->setText("offset : " + QString::number(gain_offsetArr[gain_Offset_i],'f',1));
+                return;
+            }
+        }
+    }
+    else if(focused == ui->lineEdit_Range)
+    {
+        if(increment){
+            if((range_Offset_i+1)<range_offsetArr.size()){
+                range_Offset_i++;
+                ui->label_offset->setText("offset : " + QString::number(range_offsetArr[range_Offset_i],'d',0));
+                return;
+            }
+            else if((range_Offset_i+1)==range_offsetArr.size() ){
+                range_Offset_i = 0;
+                ui->label_offset->setText("offset : " + QString::number(range_offsetArr[range_Offset_i],'d',0));
+                return;
+            }
+        }
+        else{
+            if((range_Offset_i-1)>=0){
+                range_Offset_i--;
+                ui->label_offset->setText("offset : " + QString::number(range_offsetArr[range_Offset_i],'d',0));
+                return;
+            }
+            else if((range_Offset_i-1)<0)
+            {
+                range_Offset_i = range_offsetArr.size()-1;
+                ui->label_offset->setText("offset : " + QString::number(range_offsetArr[range_Offset_i],'d',0));
+                return;
+            }
+        }
+    }
+    else if(focused == ui->lineEdit_Delay)
+    {
+        if(increment){
+            if((delay_Offset_i+1)<delay_offsetArr.size()){
+                delay_Offset_i++;
+                ui->label_offset->setText("offset : " + QString::number(delay_offsetArr[delay_Offset_i],'d',0));
+                return;
+            }
+            else if((delay_Offset_i+1)==delay_offsetArr.size() ){
+                delay_Offset_i = 0;
+                ui->label_offset->setText("offset : " + QString::number(delay_offsetArr[delay_Offset_i],'d',0));
+                return;
+            }
+        }
+        else{
+            if((delay_Offset_i-1)>=0){
+                delay_Offset_i--;
+                ui->label_offset->setText("offset : " + QString::number(delay_offsetArr[delay_Offset_i],'d',0));
+                return;
+            }
+            else if((delay_Offset_i-1)<0)
+            {
+                delay_Offset_i = delay_offsetArr.size()-1;
+                ui->label_offset->setText("offset : " + QString::number(delay_offsetArr[delay_Offset_i],'d',0));
+                return;
+            }
+        }
+    }
+    else if(focused == ui->lineEdit_Reject)
+    {
+        if(increment){
+            if((reject_Offset_i+1)<reject_offsetArr.size()){
+                reject_Offset_i++;
+                ui->label_offset->setText("offset : " + QString::number(reject_offsetArr[reject_Offset_i],'d',0));
+                return;
+            }
+            else if((reject_Offset_i+1)==reject_offsetArr.size() ){
+                reject_Offset_i = 0;
+                ui->label_offset->setText("offset : " + QString::number(reject_offsetArr[reject_Offset_i],'d',0));
+                return;
+            }
+        }
+        else{
+            if((reject_Offset_i-1)>=0){
+                reject_Offset_i--;
+                ui->label_offset->setText("offset : " + QString::number(reject_offsetArr[reject_Offset_i],'d',0));
+                return;
+            }
+            else if((range_Offset_i-1)<0)
+            {
+                reject_Offset_i = reject_offsetArr.size()-1;
+                ui->label_offset->setText("offset : " + QString::number(reject_offsetArr[reject_Offset_i],'d',0));
+                return;
+            }
+        }
+    }
 }
 DacCurveDialog::~DacCurveDialog() { delete ui; }
 

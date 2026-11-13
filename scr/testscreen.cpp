@@ -74,11 +74,7 @@ QByteArray yDataa;
 //QFile logfile;
 WtLogger logfile;
 
-QVector<float> gain_offsetArr;
-QVector<int> range_offsetArr,delay_offsetArr,reject_offsetArr;
 
-
-int gain_Offset_i,range_Offset_i,delay_Offset_i,reject_Offset_i;
 //Openlog *openlogScreen = nullptr;
 
 
@@ -1676,13 +1672,7 @@ void TestScreen::updateGraphWithData()
         yData[i]  = val;
         yDataa[i] = static_cast<uint8_t>(val); // one byte, correct value
 
-        if (xNorm[i] >= g1Start && xNorm[i] <= g1End)
-        {
-            if(yData[i]>config.th1)
-            {
-                g1buzon=true;
-            }
-        }
+
         if(DAC_display){
             if(val>0){
                     double DacPkIdx=xData[i]+(config.delay*DELAY_FACTOR);
@@ -1707,6 +1697,13 @@ void TestScreen::updateGraphWithData()
                 if(yData[i]>config.th2)
                 {
                     g2buzon=true;
+                }
+            }
+            if (xNorm[i] >= g1Start && xNorm[i] <= g1End)
+            {
+                if(yData[i]>config.th1)
+                {
+                    g1buzon=true;
                 }
             }
         }
@@ -2640,7 +2637,7 @@ void TestScreen::setInputFieldsEnabled(bool enabled)
 
 void TestScreen::onApplyGainClicked()
 {
-    ConfigEntry updatedCfg;
+    //ConfigEntry updatedCfg;
 
     double userGain = ui->lineEdit_Gain->text().toDouble();   // 🔹 CHANGE
     int selectedCh  = ui->lineEdit_ch->text().toInt();
@@ -2674,9 +2671,11 @@ void TestScreen::onApplyGainClicked()
     if (selectedCh == 1) {
         gain_ch1 = userGain * GAIN_FACTOR;
         gain_ch2 = static_cast<int>(otherCfg.Gain * GAIN_FACTOR);
+        OperateGainDual(gain_ch1, -1);
     } else {
         gain_ch2 = userGain * GAIN_FACTOR;
         gain_ch1 = static_cast<int>(selectedCfg.Gain * GAIN_FACTOR);
+        OperateGainDual(-1, gain_ch2);
     }
 
     qDebug() << "Applying gains -> CH1:" << gain_ch1
@@ -2685,17 +2684,17 @@ void TestScreen::onApplyGainClicked()
     /* -------------------------------------------------
      * 3. Apply to hardware
      * ------------------------------------------------- */
-    OperateGainDual(gain_ch1, gain_ch2);
+    //OperateGainDual(gain_ch1, gain_ch2);
 
     /* -------------------------------------------------
      * 4. Update ONLY selected channel in Config.txt
      * ------------------------------------------------- */
-    if (getconfig(calset, selectedCh, &updatedCfg) != 0) {
-        qWarning() << "Failed to reload selected channel config";
-        return;
-    }
+    // if (getconfig(calset, selectedCh, &updatedCfg) != 0) {
+    //     qWarning() << "Failed to reload selected channel config";
+    //     return;
+    // }
 
-    updatedCfg.Gain = static_cast<float>(userGain);  // 🔹 keep stored value scaled
+    //updatedCfg.Gain = static_cast<float>(userGain);  // 🔹 keep stored value scaled
 
 }
 

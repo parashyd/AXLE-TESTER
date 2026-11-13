@@ -39,10 +39,13 @@ private slots:
     void HandleGateShift(int shift);
     void SaveDACPar();
     void DrawDACCurve();
-    void loadDACCurve();
+    int loadDACCurve();
     void saveDACCurve();
     void removeLastDACPoint();
     void updateDACCurveDisplay();
+    void FunctionLeftRight(bool increment);
+    void adjustCurrentLineEdit(int delta);
+
     QString dacCurveFilePath() const;
     int DacPkBoundaries(int *, int *, int);
     bool isPointAboveLine(
@@ -83,6 +86,12 @@ private:
         None   // no input allowed
     };
 
+
+    QVector<float> gain_offsetArr;
+    QVector<int> range_offsetArr,delay_offsetArr,reject_offsetArr;
+
+
+    int gain_Offset_i,range_Offset_i,delay_Offset_i,reject_Offset_i;
 
     QMap<QLineEdit*, InputMode> inputModes;
     int userinput_prv[3] = {0};
