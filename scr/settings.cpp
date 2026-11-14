@@ -251,15 +251,14 @@ void settings::loadSettings()
 
     ui->sliderAudio->setValue(s.value("audio/level", 70).toInt());
 
-    const QDate savedDate =
-        s.value("datetime/date", QDate::currentDate()).toDate();
-    const QTime savedTime =
-        s.value("datetime/time", QTime::currentTime()).toTime();
+    // Match testdetail0: always initialize these fields from the
+    // current system date/time, not from previously saved QSettings values.
+    const QDateTime now = QDateTime::currentDateTime();
 
-    ui->lineEditDate->setText(savedDate.toString("dd-MM-yyyy"));
-    ui->lineEditHour->setText(savedTime.toString("HH"));
-    ui->lineEditMinute->setText(savedTime.toString("mm"));
-    ui->lineEditSecond->setText(savedTime.toString("ss"));
+    ui->lineEditDate->setText(now.toString("dd-MM-yyyy"));
+    ui->lineEditHour->setText(now.toString("HH"));
+    ui->lineEditMinute->setText(now.toString("mm"));
+    ui->lineEditSecond->setText(now.toString("ss"));
 
     // Clear keypad input buffers whenever settings are loaded.
     ui->lineEditDate->setProperty("inputBuffer", ui->lineEditDate->text());

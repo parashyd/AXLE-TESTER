@@ -284,7 +284,9 @@ Openlog::Openlog(QWidget *parent)
     )");
     }
 
-    basePath = QCoreApplication::applicationDirPath() + "/SavedData";
+    //basePath = QCoreApplication::applicationDirPath() + "/SavedData";
+
+    basePath = SD_CARD2 + "SavedData";
 
     /* --- Watch folders --- */
     watcher->addPath(basePath);
@@ -570,15 +572,15 @@ void Openlog::handleRemoteKey(int key)
 
     if(key==ESC){
         if(currentViewer)
-            {
-                currentViewer->closeFullscreen();
-                currentViewer = nullptr;
-            }
-            else
-            {
-                emit closeopenlogscreen();
-            }
-            return;
+        {
+            currentViewer->closeFullscreen();
+            currentViewer = nullptr;
+        }
+        else
+        {
+            emit closeopenlogscreen();
+        }
+        return;
     }
 
     if(currentViewer != nullptr){
@@ -587,19 +589,19 @@ void Openlog::handleRemoteKey(int key)
 
     switch(key)
     {
-    // case ESC:
+        // case ESC:
 
-    //     if(currentViewer)
-    //     {
-    //         currentViewer->closeFullscreen();
-    //         currentViewer = nullptr;
-    //     }
-    //     else
-    //     {
-    //         emit closeopenlogscreen();
-    //     }
+        //     if(currentViewer)
+        //     {
+        //         currentViewer->closeFullscreen();
+        //         currentViewer = nullptr;
+        //     }
+        //     else
+        //     {
+        //         emit closeopenlogscreen();
+        //     }
 
-    //     break;
+        //     break;
 
     case UP:
 

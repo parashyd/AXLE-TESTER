@@ -516,7 +516,7 @@ void DacCurveDialog::handleDigitInput(int digit)
 void DacCurveDialog::loadSavedConfig()
 {
     // QFile file("/run/media/mmcblk1p1/config_saved.json");
-    QFile file("config_saved.json");
+    QFile file(SD_CARD1+"config_saved.json");
 
     if (!file.exists() || !file.open(QIODevice::ReadOnly)) return;
 
@@ -645,7 +645,7 @@ void DacCurveDialog::adjustCurrentLineEdit(int delta)
 
     if (focused == ui->lineEdit_Gain)
     {       adjustValue(config.Gain,   0, 80, gain_offsetArr[gain_Offset_i]) ;
-        onApplyGainClicked();
+            onApplyGainClicked();
     }
     else if (focused == ui->lineEdit_Range)  {adjustValue(config.range,  50, 1000, range_offsetArr[range_Offset_i]);} // assume range is double
     else if (focused == ui->lineEdit_Delay)  adjustValue(config.delay,  0, 200, delay_offsetArr[delay_Offset_i]); // float or int
@@ -1165,9 +1165,12 @@ void DacCurveDialog::onApplyGainClicked()
     if (selectedCh == 1) {
         gain_ch1 = userGain * GAIN_FACTOR;
         gain_ch2 = static_cast<int>(otherCfg.Gain * GAIN_FACTOR);
+        OperateGainDual(gain_ch1, -1);
     } else {
         gain_ch2 = userGain * GAIN_FACTOR;
         gain_ch1 = static_cast<int>(selectedCfg.Gain * GAIN_FACTOR);
+        OperateGainDual(-1, gain_ch2);
+
     }
 
     qDebug() << "Applying gains -> CH1:" << gain_ch1
@@ -1176,7 +1179,7 @@ void DacCurveDialog::onApplyGainClicked()
     /* -------------------------------------------------
      * 3. Apply to hardware
      * ------------------------------------------------- */
-    OperateGainDual(gain_ch1, gain_ch2);
+    // OperateGainDual(gain_ch1, gain_ch2);
 
     /* -------------------------------------------------
      * 4. Update ONLY selected channel in Config.txt
@@ -1280,7 +1283,8 @@ void DacCurveDialog::handleBackspaceInput()
 }
 QString DacCurveDialog::dacCurveFilePath() const
 {
-    return QDir::current().filePath("dac_curves.json");
+    QString path = SD_CARD1+"dac_curves.json";
+    return path;
 }
 
 // void DacCurveDialog::loadDACCurve()
@@ -1609,9 +1613,8 @@ void DacCurveDialog::DrawDACCurve()
 
         double d1  = BP * cos(ang);
         double sd1 = BP * sin(ang);
-        ui->lineEdit_2->setText(QString::number(d1));
-        ui->lineEdit_DacSD->setText(QString::number(sd1));
-
+        ui->lineEdit_2->setText(QString::number(d1, 'f', 0));
+        ui->lineEdit_DacSD->setText(QString::number(sd1, 'f', 0));
         // DacPkIdx+=(config.delay*DELAY_FACTOR);
         // int idx1,idx2;
         // DacPkBoundaries(&idx1, &idx2,DacPkIdx);
