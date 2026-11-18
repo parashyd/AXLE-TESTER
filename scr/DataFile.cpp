@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <QVector>
 #include <QPointF>
+#include <unistd.h>
 #include "settings.h"
 extern SharedData* shared;
 
@@ -47,6 +48,8 @@ int getconfig(int userCalset, int userChannel, ConfigEntry* matchedConfig)
         }
     }
     fclose(configFile);
+    sync();
+    sync();
 
     return matchFound ? 0 : 1;
 }
@@ -209,7 +212,7 @@ int getFilteredPoints(const ConfigEntry& cfg, QVector<QPointF>& output)
         //qDebug()<<i <<" "<< val << "\n";
         output.append(QPointF(i, val));
     }
-
+    sync();
     return output.size();
 }
 

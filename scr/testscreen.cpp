@@ -1996,6 +1996,8 @@ bool TestScreen::updateConfigFile(const QString &filePath, const ConfigEntry &up
         }
         lines << line;
     }
+    sync();
+    sync();
     file.close();
 
     if (!lineUpdated) {
@@ -2014,6 +2016,8 @@ bool TestScreen::updateConfigFile(const QString &filePath, const ConfigEntry &up
         out << line << "\n";
     }
     file.close();
+    sync();
+    sync();
 
     qDebug() << "Config file updated successfully.";
     return true;
